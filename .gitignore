@@ -1,0 +1,54 @@
+# ===== Unreal Engine =====
+# 엔진·에디터가 다시 만드는 폴더 (어느 깊이에 있어도 무시)
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# 맵 라이팅 빌드 데이터 (재생성 가능, 용량 큼)
+*_BuiltData.uasset
+
+# 엔진이 생성하는 IDE 프로젝트 파일
+*.sln
+*.suo
+*.sdf
+*.VC.db
+*.VC.opendb
+.vsconfig
+
+# 빌드 산출물
+*.pdb
+*.obj
+*.exe
+*.dll
+*.lib
+*.exp
+*.ilk
+
+# ===== IDE =====
+.idea/
+.vs/
+.vscode/
+*.DotSettings.user
+
+# ===== Python =====
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# MediaPipe 모델 파일 — 다운로드 스크립트로 받음 (DESIGN_DECISIONS.md D10)
+*.task
+
+# ===== 로그·녹화 결과물 (영상은 레포 대신 링크로 남김, D10) =====
+logs/
+recordings/
+*.mp4
+*.mov
+*.mkv
+
+# ===== OS =====
+Thumbs.db
+Desktop.ini
+.DS_Store

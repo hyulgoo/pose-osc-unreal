@@ -1,0 +1,10 @@
+# 줄바꿈: 저장소에는 LF로 정규화하고, 작업 트리는 OS·Git 설정을 따름
+* text=auto
+
+# Windows 배치 파일은 CRLF 유지 (LF면 레이블·goto가 오동작할 수 있음)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Unreal 바이너리 에셋 → Git LFS (DESIGN_DECISIONS.md D10)
+*.uasset filter=lfs diff=lfs merge=lfs -text
+*.umap filter=lfs diff=lfs merge=lfs -text
