@@ -83,7 +83,7 @@
 - 사용 랜드마크는 손목 15(`LEFT_WRIST`)·16(`RIGHT_WRIST`)이에요. 신뢰도는 `visibility`를 기본으로 하고, `presence`도 로그로 남겨 비교한 뒤 확정해요 (§9).
 - `num_poses = 1` — 단일 관람객 기준이고, 스키마의 `person`(0/1)과 맞춰요.
 - 좌우 라벨: MediaPipe Pose의 LEFT/RIGHT는 화면 기준이 아니라 사람 기준으로 알고 있어요. 그래서 **이미지를 추론 전에 뒤집지 않고, 추론 후 좌표만 `x' = 1 − x`로 미러링**해요. 이미지를 먼저 뒤집으면 라벨이 반대로 붙을 가능성이 있어요 (실측으로 확인 — §8의 3번).
-- Windows의 MediaPipe Python은 GPU delegate를 지원하지 않는 것으로 알고 있어서 CPU로 돌려요 (공식 문서로 확인 필요).
+- MediaPipe Python의 GPU delegate는 공식 API 문서(`BaseOptions`)에 현재 Ubuntu에서만 지원한다고 적혀 있어서, Windows에서는 CPU로 돌려요 (2026-10-14 문서 확인).
 
 **면접 포인트**: 폴백 판단 근거를 모델 출력 필드로 설명할 수 있어요.
 
@@ -125,7 +125,7 @@
 | 6–8 | `rx` `ry` `rz` | float32 | 오른손, 규칙 동일 |
 | 9 | `rconf` | float32 | 오른손 신뢰도 [0, 1] |
 
-- 주소 `/dstrict/hands`, 타입 태그 `,iiffffffff`. 패킷 크기는 주소 16B + 타입 태그 12B + 인자 40B = **68바이트**라 UDP 데이터그램 하나에 분할 없이 들어가요.
+- 주소 `/dstrict/hands`, 타입 태그 `,iiffffffff`. 패킷 크기는 주소 16B + 타입 태그 12B + 인자 40B = **68바이트**라 UDP 데이터그램 하나에 분할 없이 들어가요 (python-osc 1.10.2로 실제 인코딩해서 크기·타입 태그 확인).
 - `z`는 MediaPipe의 상대 깊이(엉덩이 중점 기준, 작을수록 카메라에 가까움)라 범위가 [0, 1]로 고정되지 않고 신뢰도도 낮아요. 메시지에는 넣되 UE 매핑에서는 가중치 0으로 시작해요.
 - **heartbeat**: 사람이 없어도 같은 주기로 보내요(`person = 0`, 신뢰도 0, 좌표 0). 그래야 Unreal이 "사람 없음 → 신뢰도 폴백"과 "파이프라인 중단 → 패킷 끊김 폴백"을 구분할 수 있어요.
 - **seq**: 중복·역순 패킷을 버리고 유실률을 로그로 남기는 데 써요. localhost에서는 역순이 거의 없지만 비용이 int 하나라 넣어 둬요.
@@ -151,7 +151,8 @@
 - EMA는 계수 하나로 "떨림 ↔ 지연"을 고정된 비율로 맞바꿔요.
 - One Euro Filter(Casiez, Roussel, Vogel, CHI 2012)는 속도에 따라 컷오프 주파수를 바꿔요. 느릴 때는 강하게 평활해서 떨림을 줄이고, 빠를 때는 약하게 해서 지연을 줄여요.
 - 비용은 샘플당 O(1), 상태는 float 몇 개라 EMA와 사실상 같아요.
-- 튜닝 순서(논문 권장): `beta = 0`으로 두고 손을 거의 멈춘 상태에서 떨림이 사라질 때까지 `min_cutoff`를 내려요 → 빠르게 움직이면서 지연이 줄어들 때까지 `beta`를 올려요. 미분 컷오프 `d_cutoff`는 1Hz로 고정해요.
+- 튜닝 순서(저자 권장): `beta = 0`, `min_cutoff = 1Hz` 정도에서 시작해요 → 손을 멈추거나 아주 천천히 움직이면서 떨림이 사라지고 지연이 견딜 만할 때까지 `min_cutoff`를 조정해요(낮출수록 떨림↓ 지연↑) → 빠르게 움직이면서 지연이 줄어들 때까지 `beta`를 올려요. `beta`는 0.001이나 0.0001 정도에서 시작해 10배씩 바꿔 가며 효과를 봐요.
+- 미분 컷오프 `d_cutoff`는 저자 Python 구현의 기본값 1Hz를 그대로 써요. 구현 문서도 특별한 이유가 없으면 바꾸지 않도록 안내해요.
 
 **구현 메모**
 - **재획득 시 필터 리셋**: 유효 샘플 사이 공백이 일정 시간을 넘은 뒤 다시 들어오면 필터를 첫 샘플로 초기화해요. 리셋하지 않으면 예전 위치에서 새 위치로 파티클이 쓸려 가요 (§8의 4번). 공백 기준값과 "유효 샘플"의 신뢰도 기준은 §9에서 정해요.
@@ -267,7 +268,7 @@
 | 시연 영상 | 레포에 포함 / 외부 링크 | **외부 링크** | 용량과 LFS 대역폭 |
 | 생성물 | — | 무시 | `Binaries`, `Intermediate`, `Saved`, `DerivedDataCache`, `.idea`, `.vs`, `*.sln`, venv 등은 엔진·IDE가 다시 만들어요 |
 
-- LFS의 단점도 있어요. GitHub 무료 LFS에는 용량·대역폭 한도가 있고(현재 수치는 GitHub 요금 정책 확인), GitHub의 "Download ZIP"에는 기본적으로 LFS 실파일이 들어가지 않아요(레포 설정에서 켤 수 있음). 클라이언트에는 git-lfs가 필요한데 Git for Windows에는 기본으로 포함돼 있어요.
+- LFS의 단점도 있어요. GitHub 무료 LFS에는 용량·대역폭 한도가 있고(현재 수치는 GitHub 요금 정책 확인), GitHub의 "Download ZIP"에는 기본적으로 LFS 실파일 대신 포인터 파일만 들어가요(Settings → Archives → Include Git LFS objects in archives로 켤 수 있음). 클라이언트에는 git-lfs가 필요한데 Git for Windows에는 기본으로 포함돼 있어요.
 
 ## 5. 폴백 명세 — 요구사항과 구현의 대응
 
@@ -342,10 +343,18 @@
 | OSC 플러그인 Tick과 컴포넌트 Tick의 순서 (최대 1프레임 지연 여부) | UE 5.7 | 소스 + 로그 |
 | `FMath::VInterpTo` 구현 | UE 5.7 | 엔진 소스 |
 | MediaPipe 레거시 API 제거 여부, 지원 Python 버전 | 설치 버전 | 설치 후 import 확인 |
-| Windows MediaPipe Python의 GPU delegate 미지원 | 설치 버전 | 공식 문서 |
 | Pose LEFT/RIGHT 라벨 기준 | 설치 버전 | 실측 — 왼손만 들고 라벨 확인 |
 | 웹캠 협상 해상도·fps | 실제 장비 | 실행 로그 |
 | NNE 성숙도·지원 런타임 | UE 5.7 | 공식 문서 (비교 설명용) |
+
+**확인 완료 (2026-10-14)**
+
+| 항목 | 결과 | 출처 |
+|---|---|---|
+| OSC 메시지 크기·타입 태그 | 68바이트, `,iiffffffff` | python-osc 1.10.2로 직접 인코딩 |
+| MediaPipe Python GPU delegate 지원 범위 | 현재 Ubuntu 한정 → Windows는 CPU | MediaPipe Python API 문서 `BaseOptions` |
+| One Euro 튜닝 절차, `d_cutoff` 기본값 | §4 D4에 반영 (`d_cutoff` 1Hz는 저자 구현 기본값) | 1€ Filter 저자 페이지, 저자 Python 구현(oneeurofilter) |
+| GitHub ZIP 다운로드와 LFS | 기본은 포인터 파일만, 레포 설정으로 포함 가능 | GitHub Docs "Managing Git LFS objects in archives" |
 
 ## 11. 용어 메모
 
@@ -360,3 +369,4 @@
 | 날짜 | 내용 |
 |---|---|
 | 2026-10-14 | 최초 작성 — 사전 결정(D0) 위에 D1~D10 확정 (모든 항목 권장안 채택) |
+| 2026-10-14 | 검증 반영 — OSC 패킷 크기 실측, MediaPipe GPU 지원 범위·One Euro 튜닝 절차·GitHub LFS 아카이브 동작을 출처로 확인 (결정 변경 없음) |
