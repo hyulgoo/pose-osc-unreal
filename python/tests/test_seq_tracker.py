@@ -71,6 +71,20 @@ def test_rejected_packets_do_not_refresh_idle_timer() -> None:
     assert d.accepted and d.kind == "idle_reset"
 
 
+def test_second_sender_is_ignored_until_idle() -> None:
+    # T-007: two pose_osc processes on the same port interleave two seq streams.
+    a, b = ("127.0.0.1", 5000), ("127.0.0.1", 6000)
+    t = SeqTracker(idle_timeout_s=1.0, regress_threshold=30)
+    assert t.on_packet(100, 0.0, a).kind == "first"
+    d = t.on_packet(3, DT, b)
+    assert not d.accepted and d.kind == "other_sender"
+    assert t.on_packet(101, 2 * DT, a).kind == "next"  # no fake restart from b's low seq
+    # a stops; after Idle, b takes over (same path as a restarted sender with a new source port).
+    d = t.on_packet(4, 2 * DT + 1.1, b)
+    assert d.accepted and d.kind == "idle_reset"
+    assert t.locked_sender == b
+
+
 def test_int32_wraparound_is_treated_as_restart() -> None:
     t = SeqTracker(regress_threshold=30)
     t.on_packet(2**31 - 2, 0.0)

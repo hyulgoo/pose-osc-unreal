@@ -39,6 +39,10 @@ struct FPoseOscReceiverStats
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PoseOsc")
 	int32 Rejected = 0;
 
+	/** Packets from a second sender while another one is locked (two pose_osc processes, T-007). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PoseOsc")
+	int32 OtherSender = 0;
+
 	/** Accepted frames per second over the last ~1 s window (0 while silent). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PoseOsc")
 	float AcceptedRateHz = 0.f;
@@ -136,4 +140,5 @@ private:
 	int32 RateWindowAccepted = 0;
 	int32 RateWindowLost = 0;
 	double LastRejectLogAt = -1.0e9;
+	double LastOtherSenderLogAt = -1.0e9;
 };

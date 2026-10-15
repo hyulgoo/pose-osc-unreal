@@ -8,7 +8,7 @@
 - [x] 설계 결정 — [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)
 - [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (남은 확인: 좌우 라벨 실측)
 - [x] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시 (남은 확인: 에디터 PIE 재시작, 실제 카메라 가림)
-- [ ] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드 (C++ 완료, Niagara 에셋 `NS_PoseHands` 작성 중 — [docs/NIAGARA_SETUP.md](docs/NIAGARA_SETUP.md))
+- [ ] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드 (C++·`NS_PoseHands` 연결 완료, 이펙트 다듬기 남음 — [docs/NIAGARA_SETUP.md](docs/NIAGARA_SETUP.md) 7절)
 - [ ] 시연 — 장애 주입 시나리오 3종 녹화
 
 ## 파이프라인

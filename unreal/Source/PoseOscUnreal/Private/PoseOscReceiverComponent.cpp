@@ -227,8 +227,9 @@ void UPoseOscReceiverComponent::HandleOscMessage(const FOSCMessage& Message, con
 		return;
 	}
 
+	const FString Sender = FString::Printf(TEXT("%s:%u"), *SenderAddress, SenderPort);
 	const TOptional<int32> PreviousSeq = SeqTracker.GetLastSeq();
-	const FPoseSeqResult SeqResult = SeqTracker.Classify(Frame.Seq);
+	const FPoseSeqResult SeqResult = SeqTracker.Classify(Frame.Seq, Sender);
 	switch (SeqResult.Decision)
 	{
 	case EPoseSeqDecision::Duplicate:
@@ -236,6 +237,15 @@ void UPoseOscReceiverComponent::HandleOscMessage(const FOSCMessage& Message, con
 		return;
 	case EPoseSeqDecision::Stale:
 		++Stats.Stale;
+		return;
+	case EPoseSeqDecision::OtherSender:
+		++Stats.OtherSender;
+		if (Now - LastOtherSenderLogAt >= RejectLogIntervalSeconds)
+		{
+			LastOtherSenderLogAt = Now;
+			UE_LOG(LogPoseOsc, Warning, TEXT("Second sender %s ignored while %s is locked (dropped so far: %d). Is another pose_osc running? (T-007)"),
+				*Sender, *SeqTracker.GetLockedSender(), Stats.OtherSender);
+		}
 		return;
 	case EPoseSeqDecision::Baseline:
 		UE_LOG(LogPoseOsc, Log, TEXT("Seq baseline %d from %s:%u"), Frame.Seq, *SenderAddress, SenderPort);

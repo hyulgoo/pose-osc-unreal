@@ -13,7 +13,7 @@ C++ 드라이버(`UPoseNiagaraDriverComponent`)가 매 프레임 아래 User 파
 ## 1. 시스템 만들기
 
 1. 에디터에서 `unreal/PoseOscUnreal.uproject`를 열어요.
-2. 콘텐츠 브라우저에 `FX` 폴더를 만들어요 (`/Game/FX`).
+2. 콘텐츠 브라우저의 최상위 `Content` 폴더 **바로 아래**에 `FX` 폴더를 만들어요. 콘텐츠 브라우저에서 `Content` 폴더가 곧 `/Game`이에요. `Game` 폴더를 따로 만들면 경로가 `/Game/Game/FX`가 돼서 액터가 찾지 못해요 (T-008).
 3. `FX` 폴더에서 우클릭 → **FX → Niagara System** → **New system from selected emitter(s)** → 이미터 목록에서 **Fountain**과 **Hanging Particulates**를 함께 선택 → 이름은 **`NS_PoseHands`** (경로가 정확히 `/Game/FX/NS_PoseHands`여야 액터가 자동으로 찾아요).
 
 ## 2. User 파라미터 5개
@@ -45,22 +45,39 @@ C++ 드라이버(`UPoseNiagaraDriverComponent`)가 매 프레임 아래 User 파
 Idle일 때, 그리고 손이 Lost일 때 공간을 채우는 연출이에요 (D6 "기본 연출").
 
 1. 이름을 `Ambient`로 바꿔요.
-2. **Spawn Rate → SpawnRate** → New Expression:
+2. **Spawn Rate → SpawnRate** 값 옆 ▼ → New Expression (Spawn Rate 모듈이 없고 Spawn Burst Instantaneous만 있다면, Emitter Update의 `+`로 Spawn Rate를 추가하고 Burst는 체크 해제):
    `(1.0 - User.InteractiveWeight) * 30.0 + (2.0 - User.LeftHandWeight - User.RightHandWeight) * 10.0 + 3.0`
    - Idle → 약 53/초, 양손 Tracking → 3/초, 한 손 Lost → 약 13/초
 3. **Shape Location**(Box)의 크기를 볼륨에 맞춰요: `X 100, Y 320, Z 180` (cm)
 4. 색은 어둡게 (예: `0.3, 0.4, 0.6`)
+5. **Initialize Particle → Lifetime을 2~4초**로 줄여요. 이 템플릿은 수명이 길어서, 그대로 두면 SpawnRate가 바뀌어도 화면 밀도가 수명만큼 늦게 바뀌어요.
 
 ## 6. 저장하고 확인
 
 1. `Ctrl+S`로 저장해요. 레벨에 아무것도 배치하지 않아도 돼요.
-2. Play → Python 송신부 실행 (`--source synthetic`으로 해도 돼요).
+2. Play → Python 송신부 실행 (`--source synthetic`으로 해도 돼요). **송신부는 하나만** 띄워요. 둘이면 먼저 연결된 쪽만 받고 화면에 `SECOND SENDER ignored`가 떠요 (T-007).
 3. Output Log에서 다음을 확인해요.
    - `LogPoseOsc: Driving Niagara system NS_PoseHands` → 연결 성공
+   - `Niagara system /Game/FX/NS_PoseHands... not found; debug drawing only` → 경로가 달라요 (1-2번 폴더 위치 확인)
    - `Niagara User parameter 'X' is missing` / `has type ...` → 이름·타입 오타 (위 표와 비교)
 4. 화면: 손을 따라 파티클이 나오고, 가리면 해당 손 파티클이 옅어졌다가(Holding) 사라지고(Lost), 송신부를 끄면 1초 뒤 Ambient가 공간을 채워요.
 
 디버그 드로잉(박스·구)은 액터의 `NiagaraDriver` 컴포넌트에서 **Draw Debug**를 끄면 사라져요. 시연 녹화 때는 꺼 두세요.
+
+## 7. 다듬기 — 손 주변에 머무르게 (2026-10-15 1차 확인 후)
+
+1차 확인에서 연결은 정상이었지만, Fountain 기본값 그대로라 파티클이 높이 솟았다가 화면 전체로 떨어졌어요. 그래서 손 효과와 Ambient가 구분되지 않아요. LeftHand / RightHand 이미터에서 아래처럼 바꿔 보세요 (현재 값을 모르는 상태라 "얼마로"보다 "어느 방향으로"가 중요해요).
+
+| 모듈 | 바꿀 것 | 방향 |
+|---|---|---|
+| Add Velocity (in Cone) | 속도 크기 | 지금의 약 1/10 (30~100) — 손에서 살짝 퍼지는 정도 |
+| Gravity Force | Gravity | 0에 가깝게 (예: Z −30) 또는 모듈 끄기 |
+| Drag | Drag | 2~4 — 금방 느려져서 손 근처에 머물러요 |
+| Initialize Particle | Lifetime | 0.5~1.0초 — 손을 움직이면 짧은 꼬리가 남아요 |
+| Initialize Particle | Sprite Size | 지금보다 작게 (3~6) |
+| Initialize Particle | Color | HDR로 밝고 색 있게 (왼손 예 `0.2, 1.5, 3.0`, 오른손 예 `3.0, 0.3, 2.0`) — 블룸으로 빛나요 |
+
+Ambient는 작고(Sprite Size 2~3) 어둡게 해서 손 효과와 대비되게 하세요. 바꾼 뒤 저장해 주시면 제가 같은 방식(창 모드 캡처)으로 다시 확인할게요.
 
 ## 커밋
 

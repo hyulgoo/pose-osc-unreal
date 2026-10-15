@@ -138,10 +138,11 @@ void UPoseInteractionComponent::DrawDebug(double Now) const
 	if (Receiver)
 	{
 		const FPoseOscReceiverStats Stats = Receiver->GetStats();
-		Network = FString::Printf(TEXT("%s %s | %.1f Hz, loss %.1f%% | accepted %d lost %d dup %d stale %d restarts %d rejected %d"),
+		Network = FString::Printf(TEXT("%s %s | %.1f Hz, loss %.1f%% | accepted %d lost %d dup %d stale %d restarts %d rejected %d%s"),
 			Receiver->IsListening() ? TEXT("listening") : TEXT("NOT LISTENING"), *Receiver->GetBindDescription(),
 			Stats.AcceptedRateHz, Stats.LossRatio * 100.f, Stats.Accepted, Stats.Lost, Stats.Duplicate, Stats.Stale,
-			Stats.Restarts, Stats.Rejected);
+			Stats.Restarts, Stats.Rejected,
+			Stats.OtherSender > 0 ? *FString::Printf(TEXT(" | SECOND SENDER ignored %d"), Stats.OtherSender) : TEXT(""));
 	}
 
 	GEngine->AddOnScreenDebugMessage(KeyBase + 0, Duration, bInteractive ? FColor::Cyan : FColor(255, 140, 0),

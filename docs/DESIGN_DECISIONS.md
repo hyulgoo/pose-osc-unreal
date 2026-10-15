@@ -164,6 +164,7 @@
 - seq는 `2³¹`로 나눈 나머지로 보내요. 감싸기(wrap)가 일어나면 수신 측에서는 큰 역행으로 보여서 재시작 규칙 ②로 처리돼요 (30Hz 기준 약 2.3년에 한 번).
 - 송신 측은 범위를 강제해요: x·y·신뢰도는 [0, 1]로 클램프, NaN·inf는 0으로 바꿔요. 그래서 수신 측의 "값 경고"는 0이어야 정상이에요.
 - 수신 검사기(`python/tools/osc_receive_check.py`)는 송신 코드를 import하지 않고 표준 라이브러리만으로 바이트 단위로 파싱해요. 송신 인코더와 같은 버그를 공유하지 않게 하려는 거예요. 주소·타입 태그·크기(68B)·패딩·번들 여부를 검사하고, 어긋나면 종류별로 셉니다.
+- **송신자 고정 (보강, 2026-10-15, T-007)**: seq 규칙은 송신자가 하나라고 가정해요. 그래서 Baseline 패킷을 보낸 송신자(IP:포트)를 고정하고, seq 기준이 초기화(Idle)될 때까지 다른 송신자의 패킷은 버려요(`OtherSender`). 허용 목록(IP)만으로는 같은 PC의 두 프로세스를 구분하지 못해요. UE와 Python 수신 검사기에 같은 규칙을 넣었어요.
 - **seq 규칙의 세부 (D11에서 수치 확정)**: 역행 임계값 30. 유휴 타이머는 **채택된 패킷만** 갱신해요. 그래서 재실행이 1초보다 빨라 seq가 작게만 역행해도 (예: 직전 seq 20 → 새 seq 0) 길어야 약 1초 안에 복구돼요 (seq가 직전 값을 넘거나 Idle로 기준이 초기화됨). 테스트로 확인했어요.
 
 **면접 포인트**: heartbeat 하나로 두 폴백 조건("사람 없음"과 "파이프라인 중단")을 구분했어요.
@@ -408,13 +409,19 @@
 |---|---|---|---|
 | Niagara 연결 층 (§9) | C++ 드라이버 컴포넌트 / 블루프린트 | **C++ `UPoseNiagaraDriverComponent`** (파라미터 이름은 UPROPERTY) | D0 "C++ 우선, 블루프린트는 얇은 층만". BP나 Details에서는 에셋 지정만 해요. 시작할 때 User 파라미터의 이름·타입을 검증하고, 없으면 경고만 남겨요 (형식 오류에 안전한 폴백) |
 | User 파라미터 (§9) | 시스템 1개 + 이름 5개 / 손별 컴포넌트 2개 | **시스템 1개 `NS_PoseHands`, §9 제안 이름 그대로** (`LeftHandPos`·`RightHandPos` = Position, `LeftHandWeight`·`RightHandWeight`·`InteractiveWeight` = Float) | 손 이펙트와 기본 연출이 한 시스템 안에서 서로를 보고 섞여요. 위치는 Position 타입이라 LWC 변환을 Niagara가 처리해요 (`SetVariableVec3`가 Position 파라미터를 감지해서 `SetVariablePosition`으로 넘김 — `NiagaraComponent.cpp:2689-2696`). `User.` 접두사는 붙여도 되고 빼도 돼요 (`NiagaraUserRedirectionParameterStore.cpp:26-106`) |
-| Niagara 에셋 저작 | 스크립트로 생성 / 에디터에서 사용자 작성 | **에디터에서 사용자 작성** ([NIAGARA_SETUP.md](NIAGARA_SETUP.md)) | NiagaraEditor 모듈에는 Blueprint·Python으로 노출된 저작 API가 사실상 없어요 (`NiagaraEditor/Public`에서 `UpgradeNiagaraScriptResults.h` 하나뿐) |
+| Niagara 에셋 저작 | 스크립트로 생성 / ue-mcp / 자체 에디터 커맨드렛 / 에디터에서 사용자 작성 | **에디터에서 사용자 작성** ([NIAGARA_SETUP.md](NIAGARA_SETUP.md), 사용자 선택) | NiagaraEditor 모듈에는 Blueprint·Python으로 노출된 저작 API가 사실상 없어요 (`NiagaraEditor/Public`에서 `UpgradeNiagaraScriptResults.h` 하나뿐). 다른 경로의 검토 결과는 아래 메모 |
 | 볼륨 (D7) | 별도 볼륨 액터 / 액터 루트 Box | **`APoseInteractionActor`의 루트 `UBoxComponent`**, 기본 320×100×180cm (16:9 면이 관람 방향) | 액터를 옮기고·돌리고·스케일하면 매핑 공간이 그대로 따라가요. 축 규칙은 D7 초기 제안 그대로: x → 로컬 Y, y → 로컬 Z(반전), z → 로컬 X(`DepthWeight` 0으로 시작) |
 | 카메라 | 레벨 카메라 / 액터 카메라 | **액터 카메라**(−X 260cm에서 +X를 봄, FOV 90°, `bUseAsViewTarget`). 게임 모드의 기본 Pawn은 없앰 | 시연 구도를 고정해요. 매핑은 카메라와 독립이라 D7과 부딪히지 않아요 (카메라를 레벨 것으로 바꿔도 매핑은 그대로) |
 | 노출 | 자동 노출 / 수동 | **카메라 PostProcess 수동 노출** (Manual, 물리 카메라 노출 끔, Bias 0) | 빈 맵은 검은 화면이라 자동 노출이 HDR 파티클을 과하게 밝혀요 (**추측** — 에셋 연결 뒤 화면으로 확인) |
 | 렌더 보간 τ (§9) | 0.03 / 0.05 / 0.1초 | **0.05초** + **Lost → Tracking 재획득 시 스냅** | 30Hz(33ms) 입력의 계단을 지우면서 지연은 약 50ms예요. 스냅이 없으면 예전 위치에서 새 위치로 쓸려 와요 (§8의 4번. Python 필터 리셋과 짝) |
 | 크로스페이드 (§9) | 선형 속도 / 지수 접근 | **지수 접근**: 손 가중치 상승 τ 0.15초 · 하강 τ 0.4초, 전역 상승 0.2초 · 하강 0.5초, 목표값 Tracking 1 / **Holding 0.6** / Lost 0. 0.001 이내면 목표값으로 붙임 | 나타날 때는 빠르게, 사라질 때는 천천히 해서 폴백이 연출로 보여요. D6에는 Holding의 가중치가 정해져 있지 않아서, 시연 때 "유지 중"이 눈에 보이도록 0.6으로 했어요 (보강) |
 | 시간 기준 | 월드 시간 / `FApp::GetDeltaTime` | **`FApp::GetDeltaTime`** (시간 팽창 미적용) | 상태 타임아웃은 이미 단조 시계예요 (D3). 연출도 슬로 모션 같은 게임 시간 효과와 무관하게 둬요 |
+
+**Niagara 저작 자동화 검토 (2026-10-15)** — 사용자가 업데이트한 ue-mcp로 만들 수 있는지 확인했어요.
+- ue-mcp v1.4.4(`github.com/db-lyon/ue-mcp`, 다른 프로젝트 `Entropy/EN`에 설치)는 이 세션·프로젝트에 연결돼 있지 않았어요. 연결하려면 브리지 플러그인 복사(의존 플러그인 17개 활성화), `.mcp.json`, 세션 재시작이 필요해요.
+- 기능: 시스템 생성·이미터/모듈 추가·입력 **값** 설정·다이나믹 인풋 연결·컴파일·검증은 돼요. 하지만 ① User 파라미터 추가는 Epic `NiagaraToolsets` 경유라 **UE 5.8 이상의 `ToolsetRegistry`가 필요**하고(`UE_MCP_Bridge/.../EpicHandlers.cpp:26, 144`), ② 모듈 입력을 파라미터나 식에 연결하는 생성 액션은 없어요(`NiagaraHandlers_StackEdits.cpp:967` 주석). 이 프로젝트에 꼭 필요한 두 단계가 빠져 있는 셈이에요.
+- 자체 에디터 커맨드렛: `FNiagaraStackGraphUtilities::SetLinkedParameterValueForFunctionInput`는 `NIAGARAEDITOR_API`로 공개돼 있지만, `SetCustomExpressionForFunctionInput`는 공개되지 않았어요(UE 5.7 `NiagaraStackGraphUtilities.h:227, 235`). 가능은 하지만 에디터 모듈 추가(D12 변경)와 파라미터 설계 변경이 필요하고, 2~4시간 걸릴 걸로 봤어요.
+- 그래서 사용자가 에디터에서 직접 작성해요 (약 10~15분).
 
 **구현 메모**
 - 계층: 전송(`UPoseOscReceiverComponent`) → 해석(`UPoseInteractionComponent` + `FPoseInteractionStateMachine`) → 연출(`UPoseNiagaraDriverComponent`). 연출은 상태를 판단하지 않고 읽기만 해요. Tick 순서는 `AddTickPrerequisiteComponent(Interaction)`로 보장해요.
@@ -425,6 +432,12 @@
 **검증 결과 (2026-10-15, 에셋 연결 전)**
 - Automation Spec 24/24 (기존 19 + Presentation 5).
 - 창 모드 + synthetic 캡처: 왼손 target (0.29, 0.40)이 볼륨 앞면의 왼쪽 위에 그려지고, Lost가 된 오른손은 마지막 위치에서 구가 작아져요. 송신이 끊긴 뒤에는 Idle과 함께 양손 구가 작아지고 박스 색이 바뀌어요.
+
+**검증 결과 (2026-10-15, 에셋 연결 후)**
+- 사용자가 에디터에서 `NS_PoseHands`를 만들었어요 (LeftHand/RightHand = Fountain 기반, Ambient = Hanging Particulates 기반). 경로를 `/Game/FX`로 옮긴 뒤(T-008) `Driving Niagara system NS_PoseHands`가 찍히고, User 파라미터 5개의 이름·타입 경고가 없었어요.
+- 창 모드 + synthetic: 양손 위치에서 파티클이 나오고, Lost가 된 손은 줄기가 가늘어지다가 끊겨요. Idle에서는 Ambient가 늘어요.
+- 실제 카메라 송신부와 함께: 손을 따라 파티클이 나오고, 15초 동안 손 상태 전환이 21번 있었어요. 화면 가장자리(y≈0.84)에서 신뢰도가 0.6 근처를 오가는 것으로 보여요. 최소 유지 시간 같은 튜닝 후보로 남겨요 (그동안 사용자가 손을 어떻게 움직였는지는 확인하지 못해서 단정하지 않아요).
+- 남은 연출 튜닝: Fountain의 위쪽 속도와 중력이 그대로라 파티클이 높이 솟았다가 화면 전체로 떨어져요. 손 주변에 머무르도록 속도·중력·수명·크기·색을 줄이는 게 다음 작업이에요 ([NIAGARA_SETUP.md](NIAGARA_SETUP.md) 7절).
 
 **면접 포인트**: 상태(해석)와 연출을 나눠서, 폴백 판단은 C++ 상태 머신에 두고 Niagara는 0~1 가중치만 보게 했어요. 그래서 아티스트가 이펙트를 바꿔도 폴백 동작은 그대로예요.
 
@@ -572,3 +585,4 @@
 | 2026-10-15 | D3 `변경` 메모 — Unreal 수신 바인딩 `0.0.0.0` + 허용 송신자 `127.0.0.1`, 수신 검사기 기본 바인딩 `0.0.0.0` (사용자 선택, 원문 유지) |
 | 2026-10-15 | 사용자 확인 반영 — 좌우 라벨·PIE 시나리오 1·2·PIE 빠른 재시작 정상, T-001 원인(삼성 설정 "카메라 비활성") |
 | 2026-10-15 | 3단계(연출) — D13 신설, D4 `VInterpTo` 소스 확인, §9 Niagara·수치 항목 결정, Niagara 에셋 저작 안내 `NIAGARA_SETUP.md` 추가 |
+| 2026-10-15 | D13 Niagara 저작 자동화 검토(ue-mcp 1.4.4는 UE 5.7에서 User 파라미터 추가·연결 불가) → 사용자 직접 작성. `NS_PoseHands` 연결 검증, D3 보강 "송신자 고정"(T-007) |

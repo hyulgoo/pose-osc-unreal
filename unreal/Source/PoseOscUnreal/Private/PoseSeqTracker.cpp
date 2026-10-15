@@ -5,12 +5,17 @@ FPoseSeqTracker::FPoseSeqTracker(int32 InRegressThreshold)
 	SetRegressThreshold(InRegressThreshold);
 }
 
-FPoseSeqResult FPoseSeqTracker::Classify(int32 Seq)
+FPoseSeqResult FPoseSeqTracker::Classify(int32 Seq, const FString& Sender)
 {
 	if (!LastSeq.IsSet())
 	{
 		LastSeq = Seq;
+		LockedSender = Sender;
 		return { EPoseSeqDecision::Baseline, 0 };
+	}
+	if (Sender != LockedSender)
+	{
+		return { EPoseSeqDecision::OtherSender, 0 };
 	}
 
 	// Both values are non-negative int32, so these differences cannot overflow.
@@ -36,6 +41,7 @@ FPoseSeqResult FPoseSeqTracker::Classify(int32 Seq)
 void FPoseSeqTracker::ResetBaseline()
 {
 	LastSeq.Reset();
+	LockedSender.Reset();
 }
 
 void FPoseSeqTracker::SetRegressThreshold(int32 InRegressThreshold)
@@ -53,6 +59,7 @@ const TCHAR* FPoseSeqTracker::LexToString(EPoseSeqDecision Decision)
 	case EPoseSeqDecision::Duplicate: return TEXT("Duplicate");
 	case EPoseSeqDecision::Stale: return TEXT("Stale");
 	case EPoseSeqDecision::RestartDetected: return TEXT("RestartDetected");
+	case EPoseSeqDecision::OtherSender: return TEXT("OtherSender");
 	}
 	return TEXT("Unknown");
 }

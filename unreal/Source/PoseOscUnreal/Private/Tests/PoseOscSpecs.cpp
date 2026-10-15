@@ -116,6 +116,19 @@ void FPoseSeqTrackerSpec::Define()
 		TestTrue(TEXT("baseline after reset"), Tracker.Classify(0).Decision == EPoseSeqDecision::Baseline);
 	});
 
+	It("locks the first sender and ignores a second one until the baseline resets (T-007)", [this]()
+	{
+		FPoseSeqTracker Tracker(30);
+		TestTrue(TEXT("baseline locks A"), Tracker.Classify(100, TEXT("127.0.0.1:5000")).Decision == EPoseSeqDecision::Baseline);
+		const FPoseSeqResult FromB = Tracker.Classify(3, TEXT("127.0.0.1:6000"));
+		TestTrue(TEXT("B ignored"), FromB.Decision == EPoseSeqDecision::OtherSender);
+		TestFalse(TEXT("B not accepted"), FromB.IsAccepted());
+		TestTrue(TEXT("A continues without a fake restart"), Tracker.Classify(101, TEXT("127.0.0.1:5000")).Decision == EPoseSeqDecision::Next);
+		Tracker.ResetBaseline(); // Idle
+		TestTrue(TEXT("after Idle B can take over"), Tracker.Classify(4, TEXT("127.0.0.1:6000")).Decision == EPoseSeqDecision::Baseline);
+		TestEqual(TEXT("locked"), Tracker.GetLockedSender(), FString(TEXT("127.0.0.1:6000")));
+	});
+
 	It("handles int32 wrap-around as a restart", [this]()
 	{
 		FPoseSeqTracker Tracker(30);

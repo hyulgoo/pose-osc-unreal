@@ -118,24 +118,31 @@ def value_warnings(p: HandsPacket) -> list[str]:
 @dataclass(frozen=True, slots=True)
 class SeqDecision:
     accepted: bool
-    kind: str  # first | idle_reset | regress_reset | next | gap | duplicate | stale
+    kind: str  # first | idle_reset | regress_reset | next | gap | duplicate | stale | other_sender
     lost: int = 0
 
 
 class SeqTracker:
+    """Seq rules for ONE sender. The sender (ip, port) of the baseline packet is locked until Idle, because two
+    interleaved streams would otherwise look like endless restarts (T-007). Same rule as the Unreal receiver."""
+
     def __init__(self, idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S, regress_threshold: int = DEFAULT_REGRESS_THRESHOLD) -> None:
         self.idle_timeout_s = idle_timeout_s
         self.regress_threshold = regress_threshold
         self._last_seq: int | None = None
         self._last_accept_t: float | None = None
+        self.locked_sender: object = None
 
     def is_idle(self, now: float) -> bool:
         return self._last_accept_t is None or now - self._last_accept_t > self.idle_timeout_s
 
-    def on_packet(self, seq: int, now: float) -> SeqDecision:
+    def on_packet(self, seq: int, now: float, sender: object = None) -> SeqDecision:
         if self._last_seq is None or self.is_idle(now):
             kind = "first" if self._last_seq is None else "idle_reset"
+            self.locked_sender = sender
             return self._accept(seq, now, kind, 0)
+        if sender != self.locked_sender:
+            return SeqDecision(False, "other_sender")
         last = self._last_seq
         if seq > last:
             lost = seq - last - 1
@@ -187,6 +194,7 @@ class Summary:
     lost: int = 0
     duplicate: int = 0
     stale: int = 0
+    other_sender: int = 0  # packets from a second sender while one is locked (T-007)
     resets: dict[str, int] = field(default_factory=dict)  # first / idle_reset / regress_reset
     malformed: dict[str, int] = field(default_factory=dict)
     value_warnings: dict[str, int] = field(default_factory=dict)
@@ -222,7 +230,7 @@ class Checker:
         self.w_lost = 0
         self.w_intervals: list[float] = []
 
-    def on_datagram(self, data: bytes, now: float) -> None:
+    def on_datagram(self, data: bytes, now: float, sender: object = None) -> None:
         self.s.received += 1
         try:
             p = parse_hands(data)
@@ -234,10 +242,14 @@ class Checker:
         for w in value_warnings(p):
             self._warnings[w] += 1
 
-        d = self.tracker.on_packet(p.seq, now)
+        d = self.tracker.on_packet(p.seq, now, sender)
         if not d.accepted:
             if d.kind == "duplicate":
                 self.s.duplicate += 1
+            elif d.kind == "other_sender":
+                if self.s.other_sender == 0:
+                    print(f"  경고: 두 번째 송신자 {sender} 무시 중 (고정된 송신자 {self.tracker.locked_sender}). pose_osc가 두 개 실행 중인가요? (T-007)")
+                self.s.other_sender += 1
             else:
                 self.s.stale += 1
             if self.verbose:
@@ -290,6 +302,7 @@ class Checker:
         cum = (
             f"누적 형식오류 {sum(self._malformed.values())} 값경고 {sum(self._warnings.values())}"
             f" 중복 {self.s.duplicate} 역순 {self.s.stale} 재시작 {self._resets['idle_reset'] + self._resets['regress_reset']}"
+            + (f" 두번째송신자 {self.s.other_sender}" if self.s.other_sender else "")
         )
         line = f"[{elapsed_total:6.1f}s] {hz:5.1f}Hz ({iv}) | 유실 {loss:4.1f}% ({self.w_lost}/{total}) | {latest} | {cum}"
         self.w_accepted = self.w_lost = 0
@@ -374,8 +387,8 @@ def main(argv: list[str] | None = None) -> int:
                 if a.duration is not None and now - start >= a.duration:
                     break
                 try:
-                    data, _ = sock.recvfrom(65535)
-                    checker.on_datagram(data, time.monotonic())
+                    data, sender = sock.recvfrom(65535)
+                    checker.on_datagram(data, time.monotonic(), sender)
                 except socket.timeout:
                     pass
                 except ConnectionResetError:
