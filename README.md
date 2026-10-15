@@ -6,7 +6,7 @@
 ## 진행 상황
 
 - [x] 설계 결정 — [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)
-- [ ] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션
+- [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (남은 확인: 좌우 라벨 실측, 처리 주기 기본값 — D9 `변경` 메모)
 - [ ] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시
 - [ ] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드
 - [ ] 시연 — 장애 주입 시나리오 3종 녹화
@@ -29,11 +29,24 @@
 
 모든 전환은 가중치 크로스페이드로 처리해서, 폴백이 끊김이 아니라 연출로 보이게 해요.
 
-## 폴더 구조 (계획)
+## 폴더 구조
 
 ```text
-python/   Python 송신부 — 포즈 추정, 필터, OSC 송신, 수신 테스트 스크립트
-unreal/   UE 5.7 C++ 프로젝트
+python/
+  pose_osc/                송신부 패키지 (python -m pose_osc)
+    capture.py             캡처 스레드 + 최신 프레임 1칸 + 카메라 장애 감시 (D2, D11)
+    pose.py                Pose Landmarker 래퍼 (D1)
+    one_euro.py            One Euro Filter (D4)
+    hand_filter.py         손별 게이트·리셋·축별 필터 (D4, D11)
+    faults.py              장애 주입 (drop / freeze / noise)
+    osc_sender.py          /dstrict/hands 인코딩·UDP 송신 (D3)
+    synthetic.py           카메라 없이 정해진 움직임·이벤트를 내는 소스
+    app.py, config.py      메인 루프, 설정(dataclass + argparse)
+  tools/
+    osc_receive_check.py   수신 검사기 (표준 라이브러리만, 송신 코드와 독립)
+    download_model.py      모델 다운로드 + SHA-256 검증
+  tests/                   pytest (단위 + localhost 루프백)
+unreal/   UE 5.7 C++ 프로젝트 (2단계)
 docs/
   DESIGN_DECISIONS.md     설계 결정 — 선택지, 채택 이유, 검증 필요 항목
   TROUBLESHOOTING.md      막힘과 해결 기록
@@ -48,7 +61,60 @@ docs/
 
 ## 실행 방법
 
-구현 후 추가해요.
+### Python 송신부 (PowerShell, 레포 루트 기준)
+
+**1) 설치** — Python 3.11이 필요해요 (`py -0`으로 확인, 없으면 `winget install --id Python.Python.3.11 --scope user`).
+
+```powershell
+py -3.11 -m venv python\.venv
+python\.venv\Scripts\python -m pip install -r python\requirements-dev.txt
+cd python
+.venv\Scripts\python tools\download_model.py          # models\pose_landmarker_lite.task (SHA-256 검증)
+```
+
+**2) 수신 검사기** (터미널 1) — Unreal 없이 송신을 확인해요. Unreal PIE와 같은 포트(8000)를 쓰니 동시에 띄우지 마세요.
+
+```powershell
+.venv\Scripts\python tools\osc_receive_check.py
+```
+
+**3) 송신부** (터미널 2)
+
+```powershell
+.venv\Scripts\python -m pose_osc --max-rate 30 --preview      # 웹캠
+.venv\Scripts\python -m pose_osc --source synthetic            # 카메라·모델 없이
+```
+
+- 키: `f` 필터 토글, `q` 종료 (콘솔 또는 미리보기 창), Ctrl+C도 돼요.
+- `--max-rate 30`: 내장 카메라가 1080p@60만 줘서 처리 주기를 30Hz로 고정해요 (기본값은 D9 선택 후 정해요).
+- 기대 출력 (송신부, 2초마다):
+  ```text
+  capture 60.0fps (덮어씀 60, read 실패 누적 0) | infer 19.0ms (max 42.6) | 송신 29.8Hz (drop 0, freeze 0) | 지연 cap→send 27.9ms ... | L vis 0.90 pres 1.00 jitter 0.0170→0.0026 | ... | filter ON
+  ```
+- 기대 출력 (수신 검사기, 1초마다):
+  ```text
+  [   3.0s]  30.0Hz (간격 avg 33.3 / max 47.0ms) | 유실  0.0% (0/30) | seq 76 person 1 | L (0.256, 0.433, -0.100) c0.95 | R (...) | 누적 형식오류 0 값경고 0 중복 0 역순 0 재시작 0
+  ```
+
+**4) 장애 주입** (DESIGN_DECISIONS.md §6, D11)
+
+| 옵션 | 수신 검사기에서 보이는 것 |
+|---|---|
+| `--drop-rate 0.3` | 유실 약 30%, 약 21Hz |
+| `--freeze-after 5` (`--freeze-for 3`) | 5초 뒤 `IDLE`. `--freeze-for`를 주면 3초 뒤 재개하고 `seq 기준 초기화 (idle_reset)` |
+| `--noise 0.02` | 좌표가 흔들림. 송신부 로그의 `jitter raw→필터`로 효과 비교, `f`로 토글 |
+| `--source synthetic` | 12초 주기: 왼손 c0.50(히스테리시스 구간) → 오른손 c0.10(가림) → `person 0`(사람 없음) |
+
+**5) 테스트**
+
+```powershell
+.venv\Scripts\python -m pytest            # 전체 (루프백 포함 약 40초)
+.venv\Scripts\python -m pytest -m "not e2e"  # 단위 테스트만
+```
+
+### 좌우 라벨 확인 (DESIGN_DECISIONS.md §8의 3번)
+
+`--preview`로 실행하고 **왼손만** 들어요. 미러 화면에서 "L" 원이 들고 있는 손에 붙고, 수신 검사기의 `L (x, ...)`가 0.5보다 작아야 맞아요 (화면 왼쪽 = 작은 x).
 
 ## 저장소 메모
 
