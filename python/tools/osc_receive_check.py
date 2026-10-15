@@ -13,7 +13,10 @@ encoder cannot hide here. The seq rules are the same ones the Unreal receiver im
   Only accepted packets refresh the idle timer.
 
 Usage:
-  python tools/osc_receive_check.py [--host 127.0.0.1] [--port 8000] [--duration N] [--json]
+  python tools/osc_receive_check.py [--host 0.0.0.0] [--port 8000] [--duration N] [--json]
+
+The default bind is the wildcard, like the Unreal receiver (D3 change), so running both at once fails loudly
+with a bind error instead of one of them silently taking all localhost packets (TROUBLESHOOTING T-006).
 """
 
 from __future__ import annotations
@@ -328,7 +331,12 @@ def _json_safe(v: object) -> object:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="/dstrict/hands 수신 검사기 (D3 스키마·seq 규칙)")
-    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="바인딩 주소 (기본 0.0.0.0). Unreal도 0.0.0.0에 바인딩하므로, 둘을 동시에 띄우면 나중 쪽이 바인딩 에러로 "
+        "바로 실패해요. 127.0.0.1로 바꾸면 Windows에서 두 바인딩이 공존하고 localhost 패킷을 이쪽이 조용히 가로채요 (T-006)",
+    )
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE_TIMEOUT_S)
     p.add_argument("--regress-threshold", type=int, default=DEFAULT_REGRESS_THRESHOLD)

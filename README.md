@@ -6,8 +6,8 @@
 ## 진행 상황
 
 - [x] 설계 결정 — [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)
-- [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (남은 확인: 좌우 라벨 실측, 처리 주기 기본값 — D9 `변경` 메모)
-- [ ] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시
+- [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (남은 확인: 좌우 라벨 실측)
+- [x] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시 (남은 확인: 에디터 PIE 재시작, 실제 카메라 가림)
 - [ ] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드
 - [ ] 시연 — 장애 주입 시나리오 3종 녹화
 
@@ -46,7 +46,16 @@ python/
     osc_receive_check.py   수신 검사기 (표준 라이브러리만, 송신 코드와 독립)
     download_model.py      모델 다운로드 + SHA-256 검증
   tests/                   pytest (단위 + localhost 루프백)
-unreal/   UE 5.7 C++ 프로젝트 (2단계)
+unreal/                    UE 5.7 C++ 프로젝트 (PoseOscUnreal.uproject, 게임 모듈 1개)
+  Config/DefaultGame.ini   수신 주소·포트·허용 송신자 (Config=Game)
+  Source/PoseOscUnreal/
+    PoseOscReceiverComponent   전송: UOSCServer 수명, 형식 검증, seq, 최신 값 1칸 (D5)
+    PoseOscMessageDecoder      /dstrict/hands 엄격 디코드 (D3)
+    PoseSeqTracker             seq 규칙 (순수 C++)
+    PoseInteractionStateMachine 해석: 손별 Tracking/Holding/Lost + 전역 Interactive/Idle (순수 C++, D6)
+    PoseInteractionComponent   연결: 매 Tick 최신 프레임 → 상태 머신, 화면 디버그 표시
+    PoseInteractionActor, PoseOscGameMode  배치용 액터, 빈 맵이면 자동 생성
+    Private/Tests/PoseOscSpecs.cpp       Automation Spec (19개)
 docs/
   DESIGN_DECISIONS.md     설계 결정 — 선택지, 채택 이유, 검증 필요 항목
   TROUBLESHOOTING.md      막힘과 해결 기록
@@ -72,7 +81,7 @@ cd python
 .venv\Scripts\python tools\download_model.py          # models\pose_landmarker_lite.task (SHA-256 검증)
 ```
 
-**2) 수신 검사기** (터미널 1) — Unreal 없이 송신을 확인해요. Unreal PIE와 같은 포트(8000)를 쓰니 동시에 띄우지 마세요.
+**2) 수신 검사기** (터미널 1) — Unreal 없이 송신을 확인해요. Unreal과 같은 `0.0.0.0:8000`을 쓰기 때문에 둘을 동시에 띄우면 나중 쪽이 바인딩 오류로 멈춰요 (의도된 동작, TROUBLESHOOTING T-006).
 
 ```powershell
 .venv\Scripts\python tools\osc_receive_check.py
@@ -81,12 +90,12 @@ cd python
 **3) 송신부** (터미널 2)
 
 ```powershell
-.venv\Scripts\python -m pose_osc --max-rate 30 --preview      # 웹캠
+.venv\Scripts\python -m pose_osc --preview                    # 웹캠
 .venv\Scripts\python -m pose_osc --source synthetic            # 카메라·모델 없이
 ```
 
 - 키: `f` 필터 토글, `q` 종료 (콘솔 또는 미리보기 창), Ctrl+C도 돼요.
-- `--max-rate 30`: 내장 카메라가 1080p@60만 줘서 처리 주기를 30Hz로 고정해요 (기본값은 D9 선택 후 정해요).
+- 처리·송신은 기본 30Hz예요 (`--max-rate`, 0이면 제한 없음). 내장 카메라가 1080p@60만 줘서 이렇게 정했어요 (DESIGN_DECISIONS D9 `변경` 메모).
 - 기대 출력 (송신부, 2초마다):
   ```text
   capture 60.0fps (덮어씀 60, read 실패 누적 0) | infer 19.0ms (max 42.6) | 송신 29.8Hz (drop 0, freeze 0) | 지연 cap→send 27.9ms ... | L vis 0.90 pres 1.00 jitter 0.0170→0.0026 | ... | filter ON
@@ -111,6 +120,46 @@ cd python
 .venv\Scripts\python -m pytest            # 전체 (루프백 포함 약 40초)
 .venv\Scripts\python -m pytest -m "not e2e"  # 단위 테스트만
 ```
+
+### Unreal 수신부 (UE 5.7, 레포 루트 기준)
+
+**1) 빌드** — VS 2022(17.14 / MSVC 14.44에서 확인)와 Windows SDK가 필요해요. 에디터에서 `unreal\PoseOscUnreal.uproject`를 열고 "다시 빌드" 확인 창에서 예를 눌러도 되고, 명령으로 빌드해도 돼요.
+
+```powershell
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" PoseOscUnrealEditor Win64 Development "-Project=$PWD\unreal\PoseOscUnreal.uproject" -WaitMutex
+```
+
+- OSC 플러그인은 `.uproject`에서 켜 두었어요 (엔진 기본값은 꺼짐). Build.cs 의존: Public `Core`·`CoreUObject`·`Engine`, Private `OSC`·`Sockets`·`Networking`.
+- Rider에서는 `.uproject`를 바로 열면 돼요. `.sln`은 생성물이라 커밋하지 않아요.
+
+**2) 실행** — 에디터를 열고 Play(PIE). 시작 맵은 엔진의 빈 맵(`/Engine/Maps/Entry`)이고, `PoseOscGameMode`가 `PoseInteractionActor`를 자동으로 만들어요. 그다음 Python 송신부를 실행하면 화면 왼쪽 위에 상태가 표시돼요.
+
+```text
+[PoseOsc] INTERACTIVE 6.5s | last packet 0.01s ago | streak 6.74s | packets continuous for 0.24s >= 0.20s
+listening 0.0.0.0:8000 | 30.0 Hz, loss 0.0% | accepted 203 lost 0 dup 0 stale 0 restarts 0 rejected 0
+L: TRACKING 6.5s | conf 0.95 | target (0.279, 0.409) | conf 0.95 >= 0.60
+R: LOST     0.3s | conf 0.10 | target (0.683, 0.454) | Holding 0.51s > 0.50s
+```
+
+- 전환은 Output Log의 `LogPoseOsc`에도 찍혀요 (예: `Right hand Holding -> Lost (Holding 0.503s > 0.50s)`).
+- D6 수치(0.6 / 0.4 / 0.5초 / 0.2초 / 0.15초 / 1.0초)는 PIE 중 액터의 `Interaction` 컴포넌트 Details에서 바로 바꿀 수 있어요.
+- 수신 주소는 `unreal\Config\DefaultGame.ini`. 엔진 OSC 플러그인이 `127.0.0.1`을 LAN IP로 바꿔 바인딩하기 때문에 `0.0.0.0` + 허용 송신자 `127.0.0.1`로 두었어요 (DESIGN_DECISIONS D3 `변경` 메모, T-005).
+
+**3) 시연 시나리오** (DESIGN_DECISIONS.md §6)
+
+| 시나리오 | 하는 일 | 화면에서 보이는 것 |
+|---|---|---|
+| 1. 신뢰도 폴백 | 손으로 카메라를 가림 (카메라 없이: `--source synthetic`의 6.0~7.5초 구간) | 해당 손 `TRACKING → HOLDING`(노랑) → 0.5초 뒤 `LOST`(빨강) → 손을 떼면 `TRACKING` |
+| 2. 패킷 끊김 폴백 | Python을 Ctrl+C로 종료 → 다시 실행 (한 번의 실행으로: `--freeze-after 5 --freeze-for 3`) | 1.0초 뒤 `IDLE`, 양손 `LOST` → 재실행 0.2초 뒤 `INTERACTIVE` (로그에 `Seq baseline 0`) |
+| 3. 필터 비교 | `--noise 0.02`로 실행하고 `f`로 토글 | 3단계(Niagara)에서 확인 |
+
+**4) 테스트 (헤드리스)**
+
+```powershell
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "$PWD\unreal\PoseOscUnreal.uproject" "-ExecCmds=Automation RunTests PoseOscUnreal;Quit" -unattended -nullrhi -nosplash
+```
+
+기대 출력: 마지막 줄 `**** TEST COMPLETE. EXIT CODE: 0 ****`, `unreal\Saved\Logs\PoseOscUnreal.log`에 `Result={Success}` 19개.
 
 ### 좌우 라벨 확인 (DESIGN_DECISIONS.md §8의 3번)
 

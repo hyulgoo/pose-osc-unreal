@@ -83,7 +83,7 @@ class AppConfig:
     faults: FaultParams = field(default_factory=FaultParams)
     synthetic: SyntheticConfig = field(default_factory=SyntheticConfig)
     preview: bool = False
-    max_rate_hz: float = 0.0  # Camera source processing cap; 0 = as fast as frames and inference allow.
+    max_rate_hz: float = 30.0  # Camera source processing cap (D9 change, option A); 0 = uncapped.
     allow_power_throttling: bool = False  # Windows: keep EcoQoS throttling instead of opting out (T-004).
     duration_s: float | None = None  # None: run until Ctrl+C / 'q'.
     stats_interval_s: float = 2.0
@@ -141,8 +141,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--fourcc", type=_fourcc, default=None, help="예: MJPG (기본: 드라이버 기본값)")
     g.add_argument("--stale-timeout", type=_non_negative, default=1.0,
                    help="동일 프레임이 이 시간(초) 넘게 이어지면 카메라 장애로 보고 송신 중단 (0 = 끔)")
-    g.add_argument("--max-rate", type=_non_negative, default=0.0,
-                   help="추론·송신 주기 상한 Hz (0 = 제한 없음). 카메라가 60fps를 줄 때 30으로 고정하는 용도")
+    g.add_argument("--max-rate", type=_non_negative, default=30.0,
+                   help="추론·송신 주기 상한 Hz (기본 30, 0 = 제한 없음). 카메라가 1080p@60을 줘서 30Hz로 고정 (D9 변경)")
 
     g = p.add_argument_group("포즈 모델")
     g.add_argument("--model", choices=MODEL_VARIANTS, default="lite", help="models/ 아래 기본 파일 선택")

@@ -14,15 +14,16 @@
 | D0 | 사전 결정 | 추론은 UE 밖 Python 프로세스 · OSC over UDP · 최신 값만 게임 스레드로 · C++ 우선 | 확정 (사용자 결정) |
 | D1 | 포즈 모델 | MediaPipe Pose Landmarker (Tasks API), lite 모델로 시작 | 확정·검증 필요 |
 | D2 | 캡처 지연 | 캡처 전용 스레드 + 최신 프레임 1칸, 추론은 VIDEO 모드 동기 호출 | 확정 |
-| D3 | OSC 스키마 | 프레임당 단일 메시지 `/dstrict/hands` · heartbeat · seq · 타임아웃은 수신 측 단조 시계 | 확정 |
+| D3 | OSC 스키마 | 프레임당 단일 메시지 `/dstrict/hands` · heartbeat · seq · 타임아웃은 수신 측 단조 시계 | 확정 · **변경 (2026-10-15)**: Unreal 수신 바인딩 `0.0.0.0` + 허용 송신자 `127.0.0.1` (D3 `변경` 메모) |
 | D4 | 필터·상태 위치 | Python은 One Euro(측정 노이즈 제거), Unreal은 상태 머신 + 렌더 보간 | 확정 |
-| D5 | UE 수신 구조 | A안 — 엔진 OSC 플러그인 + 소비 측 최신 값 덮어쓰기, ActorComponent | 확정·검증 필요 |
+| D5 | UE 수신 구조 | A안 — 엔진 OSC 플러그인 + 소비 측 최신 값 덮어쓰기, ActorComponent | 확정 (소스·실측 검증 완료, 2026-10-15) |
 | D6 | 상태 머신 | 손별 Tracking/Holding/Lost + 전역 Interactive/Idle, 히스테리시스, 크로스페이드 | 확정 (수치는 튜닝) |
 | D7 | 좌표 매핑 | 정규화 좌표 → 레벨의 인터랙션 볼륨(Box) | 확정 |
 | D8 | Unreal NNE | 비교 설명만, 구현하지 않음 | 확정 |
-| D9 | 환경 기본값 | Python 3.11 + venv · 웹캠 1280×720 @ 30fps | 확정·검증 필요 → **검증 결과 충돌** (카메라가 1080p@60만 제공, 사용자 선택 대기 — D9 `변경` 메모) |
+| D9 | 환경 기본값 | Python 3.11 + venv · 웹캠 1280×720 @ 30fps | 확정·검증 필요 → **변경 (2026-10-15)**: 카메라가 1080p@60만 제공 → 1080p@60 캡처 + 처리 30Hz 고정 (사용자 선택 A, D9 `변경` 메모) |
 | D10 | 저장소 운영 | UE·Rider·Python 생성물 무시 · `.uasset`/`.umap`은 Git LFS · 모델 파일 미커밋 | 확정 (레포 생성 시 추가한 기본값) |
 | D11 | Python 송신부 세부 | 기능별 패키지 · 카메라 장애 시 송신 중단(동일 프레임 감시 포함) · 필터 런타임 토글 + 지터 로그 · 게이트 0.4 / 리셋 공백 0.3초 · seq 역행 임계값 30 | 확정 (2026-10-15, 1단계 권장안 채택) |
+| D12 | Unreal 수신부 세부 | `unreal/PoseOscUnreal.uproject` · 게임 모듈 1개 · 전송(수신 컴포넌트)/해석(순수 C++ 상태 머신) 분리 · 연속 수신 공백 허용 0.15초 · Automation Spec | 확정 (2026-10-15, 이름·위치·모듈은 사용자 결정) |
 
 ## 2. 목표와 범위
 
@@ -148,6 +149,15 @@
 - 수신 시각은 게임 스레드에서 메시지를 처리한 시각이라 소켓 도착 시각과 최대 1프레임 차이가 나요. 타임아웃 단위(0.2~1.0초)에 비하면 무시할 수준이에요.
 - 주소·포트는 기본 `127.0.0.1:8000`이고 양쪽 모두 설정으로 바꿀 수 있게 해요. 설치형 콘텐츠처럼 추론 PC를 분리하면 수신 측을 `0.0.0.0`으로 바인딩하고 방화벽 허용이 필요해요.
 
+> **`변경` 메모 (2026-10-15, 2단계) — 주소·포트. 사용자 선택으로 확정했고, 위 원문은 그대로 두었어요.**
+>
+> - 엔진 OSC 플러그인은 바인딩 주소가 루프백(127.x)이면 로컬 호스트 주소(LAN IP)로 **바꿔서** 바인딩해요 (D5 검증 결과). 실측: `ListenAddress=127.0.0.1` → `netstat`에 `UDP 70.12.229.108:8000`이 잡히고, Python이 127.0.0.1로 보낸 121개 중 **수신 0개**였어요 (T-005).
+> - 그래서 **Unreal 수신은 `0.0.0.0:8000` + 허용 송신자 `127.0.0.1`**로 바꿨어요. Python 송신 대상은 원문대로 `127.0.0.1:8000`이에요. 실측: 121/121 수신, 0.2초 뒤 Interactive.
+> - 허용 목록 필터는 플러그인이 게임 스레드 펌프(`CanProcessPacket`)에서 적용해요. 수신 스레드의 파싱·큐잉은 그 전에 일어나요. 다른 IP의 패킷은 처리되지 않지만, 소켓 자체는 모든 인터페이스에 열려 있어요. 방화벽은 UnrealEditor.exe 인바운드 허용 규칙이 이미 있어서 경고 창이 뜨지 않았어요.
+> - 네트워크 설정은 `Config=Game`(`unreal/Config/DefaultGame.ini`)이에요. 추론 PC를 분리할 때는 `+AllowedSenderAddresses=<추론 PC IP>`만 추가하면 돼요 (원문의 "0.0.0.0 바인딩 + 방화벽 허용"과 같은 방향).
+> - 수신 검사기 기본 바인딩도 `0.0.0.0`으로 바꿨어요. Windows에서는 특정 주소(127.0.0.1:8000)와 와일드카드(0.0.0.0:8000) 바인딩이 **오류 없이 공존**하고, 더 구체적인 쪽이 패킷을 전부 가져가요 (T-006). 둘 다 와일드카드면 나중에 켜진 쪽이 바인딩 오류로 바로 실패해요 (양방향 실측).
+> - 검토한 대안: ① `-MULTIHOME=127.0.0.1` 실행 인자 — 매 실행마다 필요하고 엔진 전체 네트워크에 영향 ② 자체 UDP 수신기(D5 B안) — 원문 그대로 지킬 수 있지만 반나절 이상 ③ Python이 LAN IP로 송신 — 네트워크가 바뀌면 깨짐.
+
 **구현 메모 (2026-10-15, 1단계)**
 - 타입 태그는 python-osc의 자동 추론에 맡기지 않고 `OscMessageBuilder.add_arg(value, ARG_TYPE_INT / ARG_TYPE_FLOAT)`로 명시해요. 자동 추론에서는 2³¹ 이상의 int가 int64(`h`)로 바뀌고, numpy 스칼라는 `float`가 아니라서 스키마가 조용히 깨질 수 있어요. numpy 스칼라를 넣는 경우까지 테스트로 확인했어요.
 - seq는 `2³¹`로 나눈 나머지로 보내요. 감싸기(wrap)가 일어나면 수신 측에서는 큰 역행으로 보여서 재시작 규칙 ②로 처리돼요 (30Hz 기준 약 2.3년에 한 번).
@@ -213,6 +223,26 @@
 |---|---|
 | **ActorComponent** ← 채택 | 레벨별 설정, Details 패널 튜닝, Niagara와 같은 액터에 배치 가능 |
 | WorldSubsystem | 배치가 필요 없지만 레벨별 튜닝이 불편함 |
+
+**검증 결과 (2026-10-15, UE 5.7.4 설치본 소스 `Engine/Plugins/Runtime/OSC/Source/OSC`)**
+
+| 확인 항목 | 결과 | 근거 (파일:줄) |
+|---|---|---|
+| 수신 스레드 | `FServerReceiver`(FRunnable)가 전용 스레드 `OSCReceiver_<이름>_<주소>`에서 `Socket->Wait(WaitForRead, 100ms)` → `HasPendingData`/`RecvFrom` 루프. 우선순위 `TPri_AboveNormal`, 버퍼 최대 65507B | `Private/OSCServerReceiver.h:34-43`, `OSCServerReceiver.cpp:189-242` |
+| 파싱 위치 | **수신 스레드에서** `IPacket::CreatePacket` + `ReadData`로 OSC를 파싱한 뒤 디스패치 함수 호출 (크리티컬 섹션 안) | `Private/OSCServerProxy.cpp:43-60` |
+| 내부 큐 | **있어요.** `TSpscQueue<TSharedPtr<IPacket>>` (단일 생산자·단일 소비자 락프리 큐). 디스패치 함수가 큐에 넣어요 | `Public/OSCServer.h:263,276`, `OSCServer.cpp:235-248` |
+| 게임 스레드 디스패치 | `Listen()`에서 `FTSTicker::GetCoreTicker()`에 람다를 등록하고, `PumpPacketQueue()`가 `check(IsInGameThread())` 뒤 **큐를 전부 비우면서 패킷마다** `OnOscMessageReceived`(다이나믹) → `OnOscMessageReceivedNative` 순서로 브로드캐스트 | `OSCServer.cpp:48-60, 280-334` |
+| Native 델리게이트 | **있어요.** `FOSCReceivedMessageNativeEvent OnOscMessageReceivedNative`, 시그니처 `(const FOSCMessage&, const FString& IPAddress, uint16 Port)` (다이나믹 쪽은 Port가 `int32`) | `Public/OSCServer.h:31, 180` |
+| 코어 티커와 월드 틱의 순서 | `GEngine->Tick()`(월드·컴포넌트 Tick)이 먼저(5828행), 코어 티커는 프레임 끝(6072행). 그래서 델리게이트는 그 프레임의 컴포넌트 Tick **뒤에** 오고, 컴포넌트는 **다음 프레임** Tick에서 값을 읽어요 → 최대 1프레임 추가 지연이 확정됐어요 (60fps에서 약 17ms) | `Engine/Source/Runtime/Launch/Private/LaunchEngineLoop.cpp:5828, 6072` |
+| 해제 | `Stop()`: 티커 제거 → 디스패치 함수 해제 → `ServerReceiver.Reset()`(스레드 `Kill(true)`로 대기 후 소켓 Close) → 큐 비움. `BeginDestroy()`도 `Stop()`을 불러요 | `OSCServer.cpp:83-102`, `OSCServerReceiver.cpp:37-59` |
+| **루프백 주소 치환** (예상 밖) | 바인딩 주소가 루프백(127.x)이면 `SetAsLocalHostIfLoopback`이 `GetLocalHostAddr()` 결과로 **바꿔서 바인딩**해요. `GetLocalHostAddr()`는 `-MULTIHOME=`가 없으면 172.31.255.255로 UDP connect를 해서 나가는 인터페이스 주소(= LAN IP, 이 PC는 Wi-Fi 70.12.229.108)를 돌려줘요. **실측으로 확인**: `netstat`에 `70.12.229.108:8000`, 127.0.0.1로 보낸 121개 중 수신 0개 → D3 `변경` 메모 (T-005) | `OSCServerReceiver.cpp:17-29, 130`, `Engine/Source/Runtime/Sockets/Private/BSDSockets/SocketSubsystemBSD.cpp:537-568` |
+| 바인딩 실패 감지 | `FServerReceiver::Launch`는 소켓 초기화에 실패해도 수신자 객체를 돌려주고, `FServerProxy::IsActive()`는 그 객체가 있는지만 봐요 → **바인딩에 실패해도 `IsActive()`가 true**. 그래서 컴포넌트가 실제 바인딩 주소로 먼저 바인딩 시험(probe)을 하고, 실패하면 원인과 함께 Error 로그를 남겨요. 실측: 검사기가 먼저 0.0.0.0:8000을 잡으면 `Receiver disabled: 0.0.0.0:8000 bind failed: SE_EADDRINUSE` | `OSCServerReceiver.cpp:168-187`, `OSCServerProxy.cpp:92-95` |
+| 기타 발견 | ① 헤더의 deprecation 문구("async task에서 펌프")와 달리 실제 펌프는 게임 스레드 코어 티커예요. ② `FServerProxy::RemoveClientEndpointFromAllowList`가 `Remove`가 아니라 `Add`를 호출해요 (엔진 버그로 보임 — 이 프로젝트는 제거 API를 쓰지 않아요). ③ `Listen()`을 `Stop()` 없이 두 번 부르면 티커가 두 번 등록돼요 → 컴포넌트에서 한 번만 부르도록 보장. ④ deprecated `FOSCMessage::GetPacket()`은 이미 `TSharedRef`가 소유한 객체로 새 `TSharedPtr`를 만들어요 (이중 소유로 보임) → `GetPacketRef()`/`GetArgumentsChecked()`만 써요 | `OSCServer.h:243`, `OSCServerProxy.cpp:182-185`, `OSCServer.cpp:55`, `OSCMessage.cpp:43-48` |
+
+**D5에 미치는 영향**
+- A안의 전제("플러그인 안에 이미 큐가 있다")가 소스로 확인됐어요. 프레임당 패킷이 1개(30Hz 입력, 60fps 이상 렌더)라 큐에 보통 0~1개가 쌓이고, 렌더가 30fps 밑으로 떨어지면 한 번의 펌프에서 2개 이상이 연달아 브로드캐스트돼요. 컴포넌트는 그걸 1칸에 덮어써서 마지막 값만 남겨요 (coalescing).
+- C++에서는 `OnOscMessageReceivedNative.AddUObject`로 바인딩하고 `FDelegateHandle`을 보관해서 `EndPlay`에서 `Remove`해요. 다이나믹 델리게이트(리플렉션 호출)는 쓰지 않아요.
+- 수신 시각은 핸들러가 불린 시각(프레임 끝)에 `FPlatformTime::Seconds()`로 찍어요. 소켓 도착 시각과는 최대 1프레임 차이가 나요 (D3에서 이미 허용한 오차).
 
 **면접 포인트**: 플러그인 내부 큐를 소스로 확인하고 소비 측에서 최신 값으로 합친 과정, 그리고 GC와 결정적 자원 해제의 차이를 말할 수 있어요.
 
@@ -296,6 +326,8 @@
 > | C. 해상도를 낮춰 추론 (예: 640×360으로 축소) | A나 B에 축소를 추가 | 추론 11ms로 가장 가벼워요 | 멀리 선 사람의 손 디테일이 줄어요 (D9 원래 근거와 반대). 1080p→720p 축소는 실측 이득이 없었어요 |
 >
 > 권장은 A예요. D9의 핵심 의도("30fps 입력 + 손 디테일 보존")를 지키면서, 장비가 주는 60fps를 "프레임 나이 단축"으로 바꿔 쓰는 방식이에요. 선택을 받기 전까지 코드 기본값은 B(`--max-rate 0`)로 두고, 실행 안내에는 `--max-rate 30`을 적어 둘게요.
+>
+> **사용자 선택 (2026-10-15): A** — `--max-rate` 기본값을 30으로 바꿨어요. 이 장비 기준 D9는 "카메라가 주는 1920×1080 @ 60fps 캡처, 처리·송신 30Hz"예요. 다른 카메라에서 720p@30이 협상되면 `--max-rate 30`은 아무 영향이 없어요.
 
 ### D10. 저장소 운영 `확정 (레포 생성 시 추가한 기본값)`
 
@@ -329,11 +361,42 @@
 - `--source synthetic`: 카메라·모델 없이 정해진 움직임과 이벤트를 30Hz로 보내요. 12초 주기로 양손 추적 → 왼손 신뢰도 0.5(히스테리시스 구간) → 오른손 가림(0.1, 1.5초) → 사람 없음(2초)이 반복돼요. 세션 안 검증과 2단계 Unreal 상태 머신 테스트에 같이 써요.
 - 장애 주입 의미 구분: `--drop-rate`는 메시지를 만들고(**seq 소비**) 보내지 않아서 UDP 유실처럼 보여요. `--freeze-after`는 메시지를 만들지 않아서(**seq 미소비**) 파이프라인 정지처럼 보여요. `--freeze-for N`을 주면 N초 뒤 재개해요 (시나리오 2를 한 번의 실행으로 반복 재현).
 - `--duration`: N초 뒤 자동 종료 (테스트용). `--seed`: 장애 주입 난수 고정.
-- `--max-rate`: 처리 주기 상한. 기본값은 D9 선택에 따라 정해요 (D9 `변경` 메모).
+- `--max-rate`: 처리 주기 상한. 기본값은 D9 선택에 따라 정해요 (D9 `변경` 메모). → 사용자 선택 A로 기본 30Hz.
 - Windows 전원 스로틀링(EcoQoS) 해제: 시작할 때 `SetProcessInformation(ProcessPowerThrottling)`으로 이 프로세스의 실행 속도 스로틀링을 꺼요. 시연 때는 Unreal이 포그라운드라 추론 프로세스가 백그라운드가 되기 때문이에요. 효과는 **아직 확인되지 않은 예방 조치**예요 (T-004). `--allow-power-throttling`으로 끌 수 있어요.
 - 미리보기(`--preview`)는 960 폭으로 줄여서 표시해요. 송신 좌표(미러링 후)를 미러 화면에 그려서 "L" 표시가 사람의 왼손을 따라가는지 바로 확인할 수 있어요 (§8의 3번).
 
 **면접 포인트**: "카메라가 정상 fps로 가짜 프레임을 보내는" 실측 사례를 근거로, heartbeat의 의미("관측이 살아 있음")를 지키도록 카메라 장애를 송신 중단으로 연결했어요.
+
+### D12. Unreal 수신부 세부 `확정 (2026-10-15)`
+
+| 항목 | 선택지 | 채택 | 근거 |
+|---|---|---|---|
+| 프로젝트 이름·위치 | `PoseInteractive` / `PoseOscUnreal` / … · `unreal/<이름>/` / `unreal/` 바로 아래 | **`unreal/PoseOscUnreal.uproject`** (사용자 결정) | 레포 이름과 맞춤. `unreal/`이 곧 프로젝트 루트 |
+| 모듈 구조 | 게임 모듈 1개 / + 플러그인 / + 런타임 모듈 | **게임 모듈 1개** `PoseOscUnreal` (사용자 결정) | 2~3일 일정. 상태 머신은 UObject가 없는 순수 C++ 타입이라 나중에 떼어 내기 쉬워요 |
+| 생성 방법 | 에디터 New Project / 파일 직접 작성 + UBT | **UE 5.7 C++ Blank 템플릿(`Templates/TP_Blank`)과 같은 형식으로 직접 작성** | `BuildSettingsVersion.V6`, `EngineIncludeOrderVersion.Unreal5_7`을 템플릿에서 확인했어요. 세션에서 UBT로 바로 빌드할 수 있어요. 에셋(.uasset/.umap)은 아직 없어요 |
+| 의존 모듈 (Build.cs) | — | Public: `Core`, `CoreUObject`, `Engine` · Private: `OSC`, `Sockets`, `Networking` | `OSC`는 `.uproject`에서 플러그인 활성화(엔진 기본값은 꺼짐, `OSC.uplugin` `"EnabledByDefault": false`). `Sockets`/`Networking`은 바인딩 사전 검사용. Niagara는 3단계에서 추가 |
+| 계층 분리 | — | 전송: `UPoseOscReceiverComponent` (서버 수명, 형식 검증 `PoseOsc::DecodeHandsMessage`, seq `FPoseSeqTracker`, 최신 값 1칸) · 해석: `FPoseInteractionStateMachine` ("프레임 + 수신 시각"과 "현재 시각"만 입력) · 연결: `UPoseInteractionComponent` (매 Tick 최신 프레임 1개를 넣고, Idle에 들어가면 seq 기준 초기화, 화면 디버그 표시) | D5 공통 규칙. B안으로 바꿔도 상태 머신과 테스트는 그대로예요 |
+| seq 규칙 ①의 "Idle" | 전송 계층이 자체 타이머로 판단 / 상태 머신의 Idle 진입을 따름 | **상태 머신의 Idle 진입 시 `ResetSeqBaseline()`** | Idle 판단을 한 곳(상태 머신)에만 둬요. Python 검사기는 상태 머신이 없어서 "채택 패킷 1.0초 공백"으로 같은 규칙을 흉내 내요 |
+| 손 상태 평가 시점 | 항상 / Interactive일 때만 | **Interactive일 때만** (Idle 진입 시 양손 Lost) | D6 "Idle로 들어가면 두 손은 Lost". Idle에서 연속 수신 0.2초를 채우는 그 프레임부터 손을 평가해요 |
+| "연속 수신" 공백 허용치 (§9) | 0.1 / 0.15 / 0.2초 | **0.15초** (30Hz에서 약 4프레임) | `--drop-rate 0.3`에서도 4개 연속 유실 확률은 약 0.8%라 복귀가 깜빡이지 않아요. 진짜 끊김(1.0초)과는 충분히 떨어져 있어요 |
+| 상태 머신 검증 방식 (§9) | 수동 확인 / 시간 주입형 순수 C++ + Automation Spec | **시간 주입형 + Automation Spec** (`Private/Tests/PoseOscSpecs.cpp`, 19개) | 시간을 인자로 받아서 0.5초·1.0초 경계를 sleep 없이 정확히 테스트할 수 있어요. `UnrealEditor-Cmd ... -ExecCmds="Automation RunTests PoseOscUnreal;Quit" -nullrhi`로 헤드리스 실행 (약 30초) |
+| 시각 | `UWorld::GetTimeSeconds` / `FPlatformTime::Seconds` | **`FPlatformTime::Seconds`** | D3 원문 그대로 (일시정지·Time Dilation 영향 없음) |
+
+**보강 (확정 결정과 부딪히지 않아서 바로 반영)**
+- 네트워크 설정(`ListenAddress`, `ListenPort`, `AllowedSenderAddresses`)은 `UCLASS(Config = Game)` + `UPROPERTY(Config)`예요. 다시 빌드하지 않고 `DefaultGame.ini`나 `-ini:Game:[/Script/PoseOscUnreal.PoseOscReceiverComponent]:ListenAddress=...`로 바꿀 수 있어요.
+- 바인딩 사전 검사: 플러그인과 같은 루프백 치환을 적용한 주소로 먼저 바인딩해 보고, 실패하면 Listen하지 않고 원인과 함께 Error 로그를 남겨요 (D5 "바인딩 실패 감지").
+- 수신 컴포넌트는 `check(IsInGameThread())`로 "델리게이트가 게임 스레드에서 온다"는 D5 전제를 실행 중에 확인해요.
+- OSC 주소 비교는 `FString::Equals(..., ESearchCase::CaseSensitive)`로 해요. `FString::operator==`는 대소문자를 무시해서 `/dstrict/Hands`도 통과시켜요 (테스트로 확인).
+- `x`·`y`·신뢰도가 범위를 벗어나면 클램프하고, NaN·inf·`person ∉ {0,1}`·`seq < 0`이면 버려요. 버린 패킷은 2초마다 한 번 개수와 함께 경고 로그를 남겨요.
+- 빈 맵 실행: 레벨에 `APoseInteractionActor`가 없으면 `APoseOscGameMode`가 하나 만들어요. 기본 맵은 엔진의 `/Engine/Maps/Entry`라서 에셋 없이도 PIE와 `-game`이 돌아가요. 3단계에서 프로젝트 레벨로 바꿀 예정이에요.
+- 에디터 백그라운드 스로틀링 끄기: `Config/DefaultEditorPerProjectUserSettings.ini`에 `bThrottleCPUWhenNotForeground=False`. 시연 중 Python 미리보기가 앞에 있어도 PIE가 느려지지 않게 하려는 거예요 (**효과 미검증** — 에디터에서 다른 창을 앞에 두고 fps 확인).
+- 전환 사유 문자열은 측정값을 소수 셋째 자리까지 보여요 (`Holding 0.503s > 0.50s`). 반올림 때문에 `0.50s > 0.50s`처럼 보이던 문제를 고쳤어요.
+
+**검증 결과 (2026-10-15)**
+- 헤드리스(`-game -nullrhi`, 빈 맵) + Python synthetic: 시나리오 1(오른손 가림 6.0초 → Holding, 6.5초 → Lost, 7.5초 → Tracking / 사람 없음 9~11초 → 양손 Holding → Lost → Tracking), 히스테리시스 구간(왼손 c0.5)에서 전환 없음, 시나리오 2(송신 종료 1.00초 뒤 Idle → 재실행 시 `Seq baseline 0` → 0.21초 뒤 Interactive)가 로그에 그대로 찍혔어요.
+- 창 모드(`-game -windowed`) 캡처로 화면 디버그 표시를 확인했어요. 전역 상태·수신 통계·손별 상태·전환 사유가 색으로 구분돼요. 사람이 없을 때 양손은 Lost지만 전역은 Interactive를 유지해서, heartbeat의 구분이 화면에서도 보여요.
+
+**면접 포인트**: 엔진 플러그인 소스를 읽고 "127.0.0.1을 LAN IP로 바꿔서 바인딩한다"는 걸 찾아냈고, `netstat`과 패킷 수로 실측해서 확정했어요. 해결 과정에서 Windows의 바인딩 공존 때문에 생기는 조용한 실패까지 찾아서 시끄러운 실패로 바꿨어요.
 
 ## 5. 폴백 명세 — 요구사항과 구현의 대응
 
@@ -389,17 +452,17 @@
 
 | 항목 | 메모 | 상태 (2026-10-15) |
 |---|---|---|
-| UE 프로젝트 이름·위치·모듈 구조 | 나중에 바꾸기 어려우니 사용자 확인 후 진행. 기본 제안: `unreal/PoseInteractive`, 게임 모듈 1개 | 열림 — 2단계 시작 전 사용자 답 필요 |
-| Niagara 파라미터 연결 층 | C++ 드라이버 컴포넌트(파라미터 이름을 UPROPERTY로 설정) vs 블루프린트 | 열림 |
-| Niagara User 파라미터 이름 | 초기 제안: `LeftHandPos`, `RightHandPos`, `LeftHandWeight`, `RightHandWeight`, `InteractiveWeight` | 열림 |
-| 상태 머신 검증 방식 | 시간 주입형 순수 C++ 타입 + Automation Spec 여부 | 열림 |
+| UE 프로젝트 이름·위치·모듈 구조 | 나중에 바꾸기 어려우니 사용자 확인 후 진행. 기본 제안: `unreal/PoseInteractive`, 게임 모듈 1개 | **D12에서 결정** (사용자: `unreal/PoseOscUnreal.uproject`, 게임 모듈 1개) |
+| Niagara 파라미터 연결 층 | C++ 드라이버 컴포넌트(파라미터 이름을 UPROPERTY로 설정) vs 블루프린트 | 열림 (3단계) |
+| Niagara User 파라미터 이름 | 초기 제안: `LeftHandPos`, `RightHandPos`, `LeftHandWeight`, `RightHandWeight`, `InteractiveWeight` | 열림 (3단계) |
+| 상태 머신 검증 방식 | 시간 주입형 순수 C++ 타입 + Automation Spec 여부 | **D12에서 결정** (시간 주입형 + Automation Spec 19개) |
 | 신뢰도 정의 | `visibility` 단독 vs `min(visibility, presence)` — 로그 비교 후 | 열림 — 기본 `visibility`, `--conf-source`로 비교 중 (D1 검증 메모) |
 | Python 필터 게이트 | 필터에 넣을 최소 신뢰도, 리셋 공백 기준 | **D11에서 결정** (0.4 / 0.3초) |
 | 카메라 읽기 실패 시 동작 | heartbeat 유지(사람 없음으로 보임) vs 송신 중단(파이프라인 중단으로 보임) | **D11에서 결정** (송신 중단 + 재연결 + 동일 프레임 감시) |
-| 수치 | "연속 수신"의 공백 허용치, seq 역행 임계값, 크로스페이드 속도, 렌더 보간 τ | 일부 결정 — seq 역행 임계값 30 (D11). 나머지는 2단계 |
+| 수치 | "연속 수신"의 공백 허용치, seq 역행 임계값, 크로스페이드 속도, 렌더 보간 τ | 일부 결정 — seq 역행 임계값 30 (D11), 연속 수신 공백 0.15초 (D12). 크로스페이드·τ는 3단계 |
 | 필터 비교 방식 | 실행 옵션 vs 런타임 토글 | **D11에서 결정** (둘 다 + 지터 로그) |
 | 지연 측정 방법 | 예: 고속 촬영으로 손-화면 지연 측정, 또는 같은 PC의 단조 시계 비교 | 열림 — Python 내부 구간(캡처→송신)은 통계 로그로 측정 중 (28~35ms) |
-| 처리 주기·해상도 (신규) | D9 검증 결과 충돌 | 열림 — 사용자 선택 대기 (D9 `변경` 메모) |
+| 처리 주기·해상도 (신규) | D9 검증 결과 충돌 | **결정** — A안: 1080p@60 캡처 + 30Hz 처리 (D9 `변경` 메모) |
 
 ## 10. 검증 필요 목록
 
@@ -437,6 +500,25 @@
 
 **아직 남은 1단계 검증**: Pose LEFT/RIGHT 라벨 기준 (§8의 3번) — 사용자가 왼손만 들고 미리보기의 "L" 위치와 `lx`를 확인해야 해요.
 
+**확인 완료 (2026-10-15, 2단계)**
+
+| 항목 | 결과 | 출처 |
+|---|---|---|
+| OSC 플러그인 내부 큐와 게임 스레드 디스패치 구조 | SPSC 큐 + 코어 티커에서 전부 비우며 패킷마다 브로드캐스트 | D5 검증 결과 표 |
+| `OnOscMessageReceivedNative` 존재 여부·시그니처 | 있음, `(const FOSCMessage&, const FString&, uint16)` | `OSCServer.h:31, 180` |
+| OSC 플러그인 Tick과 컴포넌트 Tick의 순서 | 코어 티커가 월드 틱 뒤 → 최대 1프레임 지연 확정 | `LaunchEngineLoop.cpp:5828, 6072` |
+| 루프백 바인딩 | 127.0.0.1 → LAN IP로 치환, localhost 수신 0/121 → D3 변경 | `netstat`, UE 로그 (T-005) |
+| Windows 바인딩 공존 | 127.0.0.1:8000과 0.0.0.0:8000이 오류 없이 공존, 구체적인 쪽이 전부 수신 | `netstat`, 수신 검사기 121/121 · UE 0 (T-006) |
+| 상태 머신·seq·디코더 | Automation Spec 19/19 통과 | `UnrealEditor-Cmd ... Automation RunTests PoseOscUnreal` |
+| 시나리오 1·2 (synthetic) | 로그와 화면 캡처로 재현 | D12 검증 결과 |
+| 빌드 환경 | VS 2022 17.14 · MSVC 14.44.35207 · Windows SDK 10.0.22621 · UBT 번들 .NET 8.0.412 | UBT 로그 |
+
+**아직 남은 2단계 검증** (사용자 PC 에디터에서)
+- PIE를 빠르게 중지·재시작해도 바인딩이 실패하지 않는지 (§8의 2번). `EndPlay`에서 `Stop()`을 부르므로 실패하지 않을 것으로 예상해요.
+- 실제 카메라로 시나리오 1 (손으로 카메라 가리기)
+- T-004: Unreal을 포그라운드로 둔 상태에서 Python 추론 시간 (`--allow-power-throttling` 유무 비교)
+- 에디터 백그라운드 스로틀링 설정의 효과
+
 ## 11. 용어 메모
 
 - **공식 용어**: OSC(Open Sound Control), UDP, One Euro Filter(1€ Filter), EMA(지수 이동 평균), 히스테리시스, Niagara User Parameter, ActorComponent, WorldSubsystem, UObject GC, RAII, NNE(Neural Network Engine)
@@ -453,3 +535,6 @@
 | 2026-10-14 | 검증 반영 — OSC 패킷 크기 실측, MediaPipe GPU 지원 범위·One Euro 튜닝 절차·GitHub LFS 아카이브 동작을 출처로 확인 (결정 변경 없음) |
 | 2026-10-15 | 1단계(Python 송신부) — D11 신설(§9의 송신부 항목 결정), D1·D2·D3·D4에 검증 메모·구현 보강 추가, §9에 상태 열 추가, §10 확인 완료 추가 |
 | 2026-10-15 | D9 `변경` 메모 — 카메라가 1080p@60만 제공해서 "1280×720 @ 30fps" 전제와 충돌. 선택지 A/B/C를 정리하고 사용자 선택 대기 (원문 유지) |
+| 2026-10-15 | D9 사용자 선택 A — `--max-rate` 기본값 30. §9 UE 프로젝트 항목 결정: 이름 `PoseOscUnreal`, 위치 `unreal/PoseOscUnreal.uproject`, 게임 모듈 1개 (D12) |
+| 2026-10-15 | 2단계(Unreal 수신부) — D5 소스 검증 결과 기록(상태: 확정), D12 신설, §9 상태 갱신, §10 2단계 확인 완료 추가 |
+| 2026-10-15 | D3 `변경` 메모 — Unreal 수신 바인딩 `0.0.0.0` + 허용 송신자 `127.0.0.1`, 수신 검사기 기본 바인딩 `0.0.0.0` (사용자 선택, 원문 유지) |
