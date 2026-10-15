@@ -5,6 +5,11 @@
 #include "PoseInteractionActor.h"
 #include "PoseOscUnreal.h"
 
+APoseOscGameMode::APoseOscGameMode()
+{
+	DefaultPawnClass = nullptr;
+}
+
 void APoseOscGameMode::StartPlay()
 {
 	Super::StartPlay();

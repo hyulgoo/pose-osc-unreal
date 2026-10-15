@@ -10,6 +10,7 @@ public class PoseOscUnreal : ModuleRules
 
 		// OSC: UOSCServer and FOSCMessage (engine plugin, enabled in the .uproject).
 		// Sockets / Networking: bind probe before Listen (UOSCServer::IsActive() stays true even when bind fails).
-		PrivateDependencyModuleNames.AddRange(new string[] { "OSC", "Sockets", "Networking" });
+		// Niagara: UNiagaraComponent / UNiagaraSystem for the presentation driver (stage 3).
+		PrivateDependencyModuleNames.AddRange(new string[] { "OSC", "Sockets", "Networking", "Niagara" });
 	}
 }

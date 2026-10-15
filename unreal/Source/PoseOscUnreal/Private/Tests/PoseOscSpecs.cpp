@@ -10,6 +10,7 @@
 #include "OSCTypes.h"
 #include "PoseInteractionStateMachine.h"
 #include "PoseOscMessageDecoder.h"
+#include "PosePresentationMath.h"
 #include "PoseSeqTracker.h"
 
 #include <limits>
@@ -312,6 +313,79 @@ void FPoseStateMachineSpec::Define()
 		AddExpectedMessage(TEXT("HoldingEnterConfidence"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1, false);
 		const FPoseInteractionStateMachine Machine(Settings);
 		TestEqual(TEXT("clamped"), Machine.GetSettings().HoldingEnterConfidence, 0.5f);
+	});
+}
+
+// ----- presentation math (D4 render interpolation, D6 crossfade, D7 volume mapping) ---------------------------
+
+BEGIN_DEFINE_SPEC(FPosePresentationSpec, "PoseOscUnreal.Presentation", EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+END_DEFINE_SPEC(FPosePresentationSpec)
+
+void FPosePresentationSpec::Define()
+{
+	using namespace PosePresentation;
+
+	It("maps normalized x/y onto the volume face seen from -X", [this]()
+	{
+		const FVector Extent(50.0, 160.0, 90.0);
+		const FPoseVolumeMappingSettings Flat;
+		TestTrue(TEXT("center"), NormalizedToVolumeLocal(FVector(0.5, 0.5, 0.0), Extent, Flat).Equals(FVector::ZeroVector));
+		// Mirrored x = 0 is the viewer's left (-Y in UE's left-handed frame); y = 0 is the top (+Z).
+		TestTrue(TEXT("top-left"), NormalizedToVolumeLocal(FVector(0.0, 0.0, 0.0), Extent, Flat).Equals(FVector(0.0, -160.0, 90.0)));
+		TestTrue(TEXT("bottom-right"), NormalizedToVolumeLocal(FVector(1.0, 1.0, 0.0), Extent, Flat).Equals(FVector(0.0, 160.0, -90.0)));
+		TestTrue(TEXT("clamped"), NormalizedToVolumeLocal(FVector(1.5, -0.5, 0.0), Extent, Flat).Equals(FVector(0.0, 160.0, 90.0)));
+	});
+
+	It("ignores depth at weight 0 and moves toward the viewer for negative z", [this]()
+	{
+		const FVector Extent(50.0, 160.0, 90.0);
+		FPoseVolumeMappingSettings Settings;
+		TestEqual(TEXT("flat"), NormalizedToVolumeLocal(FVector(0.5, 0.5, -0.4), Extent, Settings).X, 0.0);
+		Settings.DepthWeight = 1.f;
+		Settings.DepthRange = 0.5f;
+		TestEqual(TEXT("closer"), NormalizedToVolumeLocal(FVector(0.5, 0.5, -0.25), Extent, Settings).X, -25.0);
+		TestEqual(TEXT("clamped depth"), NormalizedToVolumeLocal(FVector(0.5, 0.5, -2.0), Extent, Settings).X, -50.0);
+	});
+
+	It("smooths independently of frame rate", [this]()
+	{
+		const double Tau = 0.05;
+		double At60 = 0.0;
+		for (int32 Step = 0; Step < 2; ++Step)
+		{
+			At60 += (1.0 - At60) * ExpAlpha(1.0 / 60.0, Tau);
+		}
+		const double At30 = ExpAlpha(1.0 / 30.0, Tau);
+		TestEqual(TEXT("two 60 Hz steps == one 30 Hz step"), At60, At30, 1e-9);
+		TestEqual(TEXT("tau 0 = no smoothing"), ExpAlpha(0.016, 0.0), 1.0);
+		TestEqual(TEXT("negative dt"), ExpAlpha(-1.0, Tau), 0.0);
+	});
+
+	It("crossfades weights with separate rise and fall time constants", [this]()
+	{
+		const double Dt = 1.0 / 60.0;
+		float Up = 0.f;
+		float Down = 1.f;
+		for (int32 Step = 0; Step < 9; ++Step) // 0.15 s
+		{
+			Up = ApproachWeight(Up, 1.f, Dt, 0.15, 0.4);
+			Down = ApproachWeight(Down, 0.f, Dt, 0.15, 0.4);
+		}
+		TestEqual(TEXT("rise after one tau"), Up, 1.f - FMath::Exp(-1.f), 0.01f);
+		TestTrue(TEXT("fall is slower"), 1.f - Down < Up);
+		float Settled = 0.f;
+		for (int32 Step = 0; Step < 600; ++Step)
+		{
+			Settled = ApproachWeight(Settled, 1.f, Dt, 0.15, 0.4);
+		}
+		TestEqual(TEXT("reaches exactly 1"), Settled, 1.f);
+	});
+
+	It("uses Tracking 1 / Holding HoldingWeight / Lost 0 as weight targets", [this]()
+	{
+		TestEqual(TEXT("tracking"), HandWeightTarget(EPoseHandState::Tracking, 0.6f), 1.f);
+		TestEqual(TEXT("holding"), HandWeightTarget(EPoseHandState::Holding, 0.6f), 0.6f);
+		TestEqual(TEXT("lost"), HandWeightTarget(EPoseHandState::Lost, 0.6f), 0.f);
 	});
 }
 

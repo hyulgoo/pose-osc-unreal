@@ -8,7 +8,7 @@
 - [x] 설계 결정 — [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)
 - [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (남은 확인: 좌우 라벨 실측)
 - [x] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시 (남은 확인: 에디터 PIE 재시작, 실제 카메라 가림)
-- [ ] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드
+- [ ] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드 (C++ 완료, Niagara 에셋 `NS_PoseHands` 작성 중 — [docs/NIAGARA_SETUP.md](docs/NIAGARA_SETUP.md))
 - [ ] 시연 — 장애 주입 시나리오 3종 녹화
 
 ## 파이프라인
@@ -54,12 +54,16 @@ unreal/                    UE 5.7 C++ 프로젝트 (PoseOscUnreal.uproject, 게�
     PoseSeqTracker             seq 규칙 (순수 C++)
     PoseInteractionStateMachine 해석: 손별 Tracking/Holding/Lost + 전역 Interactive/Idle (순수 C++, D6)
     PoseInteractionComponent   연결: 매 Tick 최신 프레임 → 상태 머신, 화면 디버그 표시
-    PoseInteractionActor, PoseOscGameMode  배치용 액터, 빈 맵이면 자동 생성
-    Private/Tests/PoseOscSpecs.cpp       Automation Spec (19개)
+    PoseNiagaraDriverComponent 연출: 볼륨 매핑 · 렌더 보간 · 크로스페이드 → Niagara User 파라미터 (D13)
+    PosePresentationMath       연출 계산 순수 함수 (매핑, exp 보간, 가중치)
+    PoseInteractionActor, PoseOscGameMode  루트 Box = 인터랙션 볼륨 + 카메라 + Niagara, 빈 맵이면 자동 생성
+    Private/Tests/PoseOscSpecs.cpp       Automation Spec (24개)
+  Content/FX/NS_PoseHands    Niagara 시스템 (에디터에서 작성, Git LFS)
 docs/
   DESIGN_DECISIONS.md     설계 결정 — 선택지, 채택 이유, 검증 필요 항목
   TROUBLESHOOTING.md      막힘과 해결 기록
   NEXT_SESSION_PROMPT.md  다음 작업 세션 시작 프롬프트
+  NIAGARA_SETUP.md        Niagara 시스템 NS_PoseHands 만드는 순서
 ```
 
 ## 환경
@@ -159,7 +163,7 @@ R: LOST     0.3s | conf 0.10 | target (0.683, 0.454) | Holding 0.51s > 0.50s
 & "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "$PWD\unreal\PoseOscUnreal.uproject" "-ExecCmds=Automation RunTests PoseOscUnreal;Quit" -unattended -nullrhi -nosplash
 ```
 
-기대 출력: 마지막 줄 `**** TEST COMPLETE. EXIT CODE: 0 ****`, `unreal\Saved\Logs\PoseOscUnreal.log`에 `Result={Success}` 19개.
+기대 출력: 마지막 줄 `**** TEST COMPLETE. EXIT CODE: 0 ****`, `unreal\Saved\Logs\PoseOscUnreal.log`에 `Result={Success}` 24개. 시작 직후의 `LogAutomationTest: Error: Condition failed` 4줄은 엔진 쪽 출력이에요 (DESIGN_DECISIONS D12 참고).
 
 ### 좌우 라벨 확인 (DESIGN_DECISIONS.md §8의 3번)
 

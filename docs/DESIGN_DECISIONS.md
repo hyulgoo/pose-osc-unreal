@@ -24,6 +24,7 @@
 | D10 | 저장소 운영 | UE·Rider·Python 생성물 무시 · `.uasset`/`.umap`은 Git LFS · 모델 파일 미커밋 | 확정 (레포 생성 시 추가한 기본값) |
 | D11 | Python 송신부 세부 | 기능별 패키지 · 카메라 장애 시 송신 중단(동일 프레임 감시 포함) · 필터 런타임 토글 + 지터 로그 · 게이트 0.4 / 리셋 공백 0.3초 · seq 역행 임계값 30 | 확정 (2026-10-15, 1단계 권장안 채택) |
 | D12 | Unreal 수신부 세부 | `unreal/PoseOscUnreal.uproject` · 게임 모듈 1개 · 전송(수신 컴포넌트)/해석(순수 C++ 상태 머신) 분리 · 연속 수신 공백 허용 0.15초 · Automation Spec | 확정 (2026-10-15, 이름·위치·모듈은 사용자 결정) |
+| D13 | 연출 연결 | C++ 드라이버 컴포넌트 → Niagara User 파라미터 5개 · 액터 루트 Box = 인터랙션 볼륨 · 렌더 보간 τ 0.05초 + 재획득 스냅 · 가중치 지수 크로스페이드 | 확정 (2026-10-15, 3단계 권장안 채택) |
 
 ## 2. 목표와 범위
 
@@ -188,6 +189,7 @@
 - **재획득 시 필터 리셋**: 유효 샘플 사이 공백이 일정 시간을 넘은 뒤 다시 들어오면 필터를 첫 샘플로 초기화해요. 리셋하지 않으면 예전 위치에서 새 위치로 파티클이 쓸려 가요 (§8의 4번). 공백 기준값과 "유효 샘플"의 신뢰도 기준은 §9에서 정해요.
 - 신뢰도가 낮은 샘플은 필터에 넣지 않아요. 그때 보내는 좌표는 수신 측이 신뢰도를 보고 무시해요.
 - **Unreal 렌더 보간**: `alpha = 1 − exp(−dt / τ)` 형태의 지수 보간으로 프레임레이트에 독립적으로 만들어요. 30Hz 입력과 60~120Hz 렌더 사이의 계단 현상을 없애는 역할이에요. `FMath::VInterpTo`는 이동량을 `Clamp(dt × speed, 0, 1)`로 계산해서 엄밀히는 프레임레이트에 독립이 아니에요 (UE 5.x 소스 기준 기억 — 5.7 소스로 확인).
+  - **확인 (2026-10-15, UE 5.7.4 `Engine/Source/Runtime/Core/Private/Math/UnrealMath.cpp:2584-2605`)**: 기억대로 `DeltaMove = Dist * Clamp(DeltaTime * InterpSpeed, 0, 1)`이에요. 그리고 `Dist.SizeSquared() < UE_KINDA_SMALL_NUMBER`(약 1cm 미만)면 목표로 바로 점프해요. 그래서 `PosePresentation::ExpAlpha`를 직접 구현했고, "60Hz 두 번 = 30Hz 한 번"을 테스트로 확인했어요 (D13).
 
 **보강 (2026-10-15, 1단계 구현)**
 - **게이트 불변식**: Python의 필터 게이트(최소 신뢰도)는 **Unreal Holding 진입 임계값(D6의 0.4) 이하**여야 해요. Unreal은 0.4~0.6 히스테리시스 구간에서도 Tracking 상태면 좌표를 쓰기 때문에, 게이트가 이보다 높으면 필터를 거치지 않은 좌표가 화면에 쓰여요. 그래서 기본 게이트는 0.4예요 (D11).
@@ -398,6 +400,34 @@
 
 **면접 포인트**: 엔진 플러그인 소스를 읽고 "127.0.0.1을 LAN IP로 바꿔서 바인딩한다"는 걸 찾아냈고, `netstat`과 패킷 수로 실측해서 확정했어요. 해결 과정에서 Windows의 바인딩 공존 때문에 생기는 조용한 실패까지 찾아서 시끄러운 실패로 바꿨어요.
 
+**참고 — 매 실행 로그의 `LogAutomationTest: Error: Condition failed` 4줄**: 엔진 초기 로드 직후(테스트 시작 전)에 찍히고, 테스트를 돌리지 않은 에디터 세션 로그에도 똑같이 나와요. 메시지는 엔진 `Core/Public/Misc/LowLevelTestAdapter.h:126`의 `CHECK` 매크로가 남기는 것이고, 이 프로젝트 모듈은 이 매크로를 쓰지 않아요. 그래서 엔진 내부 저수준 테스트의 출력으로 보고 있어요 (**추정** — 출처 모듈은 특정하지 않았어요). 우리 Spec의 결과는 `Result={Success}` 줄로 판단해요.
+
+### D13. 연출 연결 — Niagara 드라이버 · 볼륨 매핑 · 크로스페이드 `확정 (2026-10-15)`
+
+| 항목 | 선택지 | 채택 | 근거 |
+|---|---|---|---|
+| Niagara 연결 층 (§9) | C++ 드라이버 컴포넌트 / 블루프린트 | **C++ `UPoseNiagaraDriverComponent`** (파라미터 이름은 UPROPERTY) | D0 "C++ 우선, 블루프린트는 얇은 층만". BP나 Details에서는 에셋 지정만 해요. 시작할 때 User 파라미터의 이름·타입을 검증하고, 없으면 경고만 남겨요 (형식 오류에 안전한 폴백) |
+| User 파라미터 (§9) | 시스템 1개 + 이름 5개 / 손별 컴포넌트 2개 | **시스템 1개 `NS_PoseHands`, §9 제안 이름 그대로** (`LeftHandPos`·`RightHandPos` = Position, `LeftHandWeight`·`RightHandWeight`·`InteractiveWeight` = Float) | 손 이펙트와 기본 연출이 한 시스템 안에서 서로를 보고 섞여요. 위치는 Position 타입이라 LWC 변환을 Niagara가 처리해요 (`SetVariableVec3`가 Position 파라미터를 감지해서 `SetVariablePosition`으로 넘김 — `NiagaraComponent.cpp:2689-2696`). `User.` 접두사는 붙여도 되고 빼도 돼요 (`NiagaraUserRedirectionParameterStore.cpp:26-106`) |
+| Niagara 에셋 저작 | 스크립트로 생성 / 에디터에서 사용자 작성 | **에디터에서 사용자 작성** ([NIAGARA_SETUP.md](NIAGARA_SETUP.md)) | NiagaraEditor 모듈에는 Blueprint·Python으로 노출된 저작 API가 사실상 없어요 (`NiagaraEditor/Public`에서 `UpgradeNiagaraScriptResults.h` 하나뿐) |
+| 볼륨 (D7) | 별도 볼륨 액터 / 액터 루트 Box | **`APoseInteractionActor`의 루트 `UBoxComponent`**, 기본 320×100×180cm (16:9 면이 관람 방향) | 액터를 옮기고·돌리고·스케일하면 매핑 공간이 그대로 따라가요. 축 규칙은 D7 초기 제안 그대로: x → 로컬 Y, y → 로컬 Z(반전), z → 로컬 X(`DepthWeight` 0으로 시작) |
+| 카메라 | 레벨 카메라 / 액터 카메라 | **액터 카메라**(−X 260cm에서 +X를 봄, FOV 90°, `bUseAsViewTarget`). 게임 모드의 기본 Pawn은 없앰 | 시연 구도를 고정해요. 매핑은 카메라와 독립이라 D7과 부딪히지 않아요 (카메라를 레벨 것으로 바꿔도 매핑은 그대로) |
+| 노출 | 자동 노출 / 수동 | **카메라 PostProcess 수동 노출** (Manual, 물리 카메라 노출 끔, Bias 0) | 빈 맵은 검은 화면이라 자동 노출이 HDR 파티클을 과하게 밝혀요 (**추측** — 에셋 연결 뒤 화면으로 확인) |
+| 렌더 보간 τ (§9) | 0.03 / 0.05 / 0.1초 | **0.05초** + **Lost → Tracking 재획득 시 스냅** | 30Hz(33ms) 입력의 계단을 지우면서 지연은 약 50ms예요. 스냅이 없으면 예전 위치에서 새 위치로 쓸려 와요 (§8의 4번. Python 필터 리셋과 짝) |
+| 크로스페이드 (§9) | 선형 속도 / 지수 접근 | **지수 접근**: 손 가중치 상승 τ 0.15초 · 하강 τ 0.4초, 전역 상승 0.2초 · 하강 0.5초, 목표값 Tracking 1 / **Holding 0.6** / Lost 0. 0.001 이내면 목표값으로 붙임 | 나타날 때는 빠르게, 사라질 때는 천천히 해서 폴백이 연출로 보여요. D6에는 Holding의 가중치가 정해져 있지 않아서, 시연 때 "유지 중"이 눈에 보이도록 0.6으로 했어요 (보강) |
+| 시간 기준 | 월드 시간 / `FApp::GetDeltaTime` | **`FApp::GetDeltaTime`** (시간 팽창 미적용) | 상태 타임아웃은 이미 단조 시계예요 (D3). 연출도 슬로 모션 같은 게임 시간 효과와 무관하게 둬요 |
+
+**구현 메모**
+- 계층: 전송(`UPoseOscReceiverComponent`) → 해석(`UPoseInteractionComponent` + `FPoseInteractionStateMachine`) → 연출(`UPoseNiagaraDriverComponent`). 연출은 상태를 판단하지 않고 읽기만 해요. Tick 순서는 `AddTickPrerequisiteComponent(Interaction)`로 보장해요.
+- 계산은 순수 함수(`PosePresentationMath.h`: `NormalizedToVolumeLocal`, `ExpAlpha`, `ApproachWeight`, `HandWeightTarget`)로 두고 Spec 5개로 검증해요.
+- 기본 시스템 경로는 `Config=Game`(`DefaultGame.ini`의 `DefaultSystem=/Game/FX/NS_PoseHands.NS_PoseHands`)이에요. 액터의 Niagara 컴포넌트에 에셋이 없을 때만 써요. 에셋이 없으면 "debug drawing only" 로그를 남기고 디버그 드로잉만 해요.
+- 디버그 드로잉: 박스(Idle 회색 → Interactive 청록), 손 구(색 = 상태, 반지름 = 가중치), 흰 점 = 보간 전 목표. 처음에는 박스를 주황→청록으로 HSV 보간했는데, 중간에 초록을 지나서 "Tracking"처럼 보여 회색→청록으로 바꿨어요.
+
+**검증 결과 (2026-10-15, 에셋 연결 전)**
+- Automation Spec 24/24 (기존 19 + Presentation 5).
+- 창 모드 + synthetic 캡처: 왼손 target (0.29, 0.40)이 볼륨 앞면의 왼쪽 위에 그려지고, Lost가 된 오른손은 마지막 위치에서 구가 작아져요. 송신이 끊긴 뒤에는 Idle과 함께 양손 구가 작아지고 박스 색이 바뀌어요.
+
+**면접 포인트**: 상태(해석)와 연출을 나눠서, 폴백 판단은 C++ 상태 머신에 두고 Niagara는 0~1 가중치만 보게 했어요. 그래서 아티스트가 이펙트를 바꿔도 폴백 동작은 그대로예요.
+
 ## 5. 폴백 명세 — 요구사항과 구현의 대응
 
 | 요구사항 | 구현 | 관련 |
@@ -453,13 +483,13 @@
 | 항목 | 메모 | 상태 (2026-10-15) |
 |---|---|---|
 | UE 프로젝트 이름·위치·모듈 구조 | 나중에 바꾸기 어려우니 사용자 확인 후 진행. 기본 제안: `unreal/PoseInteractive`, 게임 모듈 1개 | **D12에서 결정** (사용자: `unreal/PoseOscUnreal.uproject`, 게임 모듈 1개) |
-| Niagara 파라미터 연결 층 | C++ 드라이버 컴포넌트(파라미터 이름을 UPROPERTY로 설정) vs 블루프린트 | 열림 (3단계) |
-| Niagara User 파라미터 이름 | 초기 제안: `LeftHandPos`, `RightHandPos`, `LeftHandWeight`, `RightHandWeight`, `InteractiveWeight` | 열림 (3단계) |
+| Niagara 파라미터 연결 층 | C++ 드라이버 컴포넌트(파라미터 이름을 UPROPERTY로 설정) vs 블루프린트 | **D13에서 결정** (C++ 드라이버) |
+| Niagara User 파라미터 이름 | 초기 제안: `LeftHandPos`, `RightHandPos`, `LeftHandWeight`, `RightHandWeight`, `InteractiveWeight` | **D13에서 결정** (제안 그대로, 위치는 Position 타입) |
 | 상태 머신 검증 방식 | 시간 주입형 순수 C++ 타입 + Automation Spec 여부 | **D12에서 결정** (시간 주입형 + Automation Spec 19개) |
 | 신뢰도 정의 | `visibility` 단독 vs `min(visibility, presence)` — 로그 비교 후 | 열림 — 기본 `visibility`, `--conf-source`로 비교 중 (D1 검증 메모) |
 | Python 필터 게이트 | 필터에 넣을 최소 신뢰도, 리셋 공백 기준 | **D11에서 결정** (0.4 / 0.3초) |
 | 카메라 읽기 실패 시 동작 | heartbeat 유지(사람 없음으로 보임) vs 송신 중단(파이프라인 중단으로 보임) | **D11에서 결정** (송신 중단 + 재연결 + 동일 프레임 감시) |
-| 수치 | "연속 수신"의 공백 허용치, seq 역행 임계값, 크로스페이드 속도, 렌더 보간 τ | 일부 결정 — seq 역행 임계값 30 (D11), 연속 수신 공백 0.15초 (D12). 크로스페이드·τ는 3단계 |
+| 수치 | "연속 수신"의 공백 허용치, seq 역행 임계값, 크로스페이드 속도, 렌더 보간 τ | **결정** — seq 역행 임계값 30 (D11), 연속 수신 공백 0.15초 (D12), 크로스페이드 τ·렌더 보간 τ 0.05초 (D13) |
 | 필터 비교 방식 | 실행 옵션 vs 런타임 토글 | **D11에서 결정** (둘 다 + 지터 로그) |
 | 지연 측정 방법 | 예: 고속 촬영으로 손-화면 지연 측정, 또는 같은 PC의 단조 시계 비교 | 열림 — Python 내부 구간(캡처→송신)은 통계 로그로 측정 중 (28~35ms) |
 | 처리 주기·해상도 (신규) | D9 검증 결과 충돌 | **결정** — A안: 1080p@60 캡처 + 30Hz 처리 (D9 `변경` 메모) |
@@ -519,6 +549,8 @@
 - T-004: Unreal을 포그라운드로 둔 상태에서 Python 추론 시간 (`--allow-power-throttling` 유무 비교)
 - 에디터 백그라운드 스로틀링 설정의 효과
 
+**사용자 확인 결과 (2026-10-15)**: 좌우 라벨(왼손 → 미리보기 "L", D1 방식 확정), 에디터 PIE에서 실제 카메라로 시나리오 1·2, PIE 빠른 재시작(바인딩 실패 없음)이 모두 정상이에요. 카메라 차단 원인은 삼성 설정의 "카메라 비활성"이었어요 (T-001). T-004와 에디터 스로틀링 효과는 따로 보고되지 않아서 남은 항목으로 둬요.
+
 ## 11. 용어 메모
 
 - **공식 용어**: OSC(Open Sound Control), UDP, One Euro Filter(1€ Filter), EMA(지수 이동 평균), 히스테리시스, Niagara User Parameter, ActorComponent, WorldSubsystem, UObject GC, RAII, NNE(Neural Network Engine)
@@ -538,3 +570,5 @@
 | 2026-10-15 | D9 사용자 선택 A — `--max-rate` 기본값 30. §9 UE 프로젝트 항목 결정: 이름 `PoseOscUnreal`, 위치 `unreal/PoseOscUnreal.uproject`, 게임 모듈 1개 (D12) |
 | 2026-10-15 | 2단계(Unreal 수신부) — D5 소스 검증 결과 기록(상태: 확정), D12 신설, §9 상태 갱신, §10 2단계 확인 완료 추가 |
 | 2026-10-15 | D3 `변경` 메모 — Unreal 수신 바인딩 `0.0.0.0` + 허용 송신자 `127.0.0.1`, 수신 검사기 기본 바인딩 `0.0.0.0` (사용자 선택, 원문 유지) |
+| 2026-10-15 | 사용자 확인 반영 — 좌우 라벨·PIE 시나리오 1·2·PIE 빠른 재시작 정상, T-001 원인(삼성 설정 "카메라 비활성") |
+| 2026-10-15 | 3단계(연출) — D13 신설, D4 `VInterpTo` 소스 확인, §9 Niagara·수치 항목 결정, Niagara 에셋 저작 안내 `NIAGARA_SETUP.md` 추가 |
