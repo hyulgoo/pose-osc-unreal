@@ -122,6 +122,6 @@
 - 날짜 · 단계: 2026-10-15 · 연출
 - 증상: `NS_PoseHands`를 만들고 저장했는데 PIE에서 반응이 확인되지 않았어요.
 - 확인: 파일이 `Content/Game/FX/NS_PoseHands.uasset`에 있었어요. 콘텐츠 브라우저에서 `Game` 폴더를 하나 더 만든 상태라 패키지 경로가 `/Game/Game/FX/NS_PoseHands`였고, 설정의 `DefaultSystem=/Game/FX/NS_PoseHands`와 달랐어요.
-- 해결: 에디터를 닫은 뒤 파일을 `Content/FX/`로 옮겼어요(참조하는 에셋이 없어서 리다이렉터가 필요 없음, 해시 동일 확인). `NIAGARA_SETUP.md`에 "`FX` 폴더는 `Content` 바로 아래"라고 적었어요. 드라이버가 에셋을 못 찾으면 `Niagara system ... not found; debug drawing only` 로그를 남기는데, 이 로그를 보는 법도 문서에 추가했어요.
+- 해결: 에디터를 닫은 뒤 파일을 `Content/FX/`로 옮겼어요(참조하는 에셋이 없어서 리다이렉터가 필요 없음, 해시 동일 확인). `NIAGARA_SETUP.md`에 "`FX` 폴더는 `Content` 바로 아래"라고 적었어요. 드라이버가 에셋을 못 찾으면 `Niagara system ... not found; debug drawing only` 로그를 남기는데, 이 로그를 보는 법도 문서에 추가했어요. (작성 안내 문서는 2026-10-17 작업이 끝나 삭제했고, 경로 규칙과 로그 확인법은 README 「Niagara 시스템」으로 옮겼어요.)
 - 결과: `Driving Niagara system NS_PoseHands`, User 파라미터 경고 없음, 파티클이 손 위치에서 나옴 (창 모드 캡처).
 - 면접용 30초 버전: 생략 가능한 작은 건이에요. 경로를 설정으로 찾는 구조라 "없으면 디버그 드로잉만 한다"는 폴백과 로그를 미리 넣어 둔 덕분에 바로 원인을 찾았어요.

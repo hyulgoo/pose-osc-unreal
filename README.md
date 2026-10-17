@@ -5,11 +5,11 @@
 
 ## 진행 상황
 
-- [x] 설계 결정 — [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md)
-- [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (남은 확인: 좌우 라벨 실측)
-- [x] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시 (남은 확인: 에디터 PIE 재시작, 실제 카메라 가림)
-- [ ] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드 (C++·`NS_PoseHands` 연결 완료, 이펙트 다듬기 남음 — [docs/NIAGARA_SETUP.md](docs/NIAGARA_SETUP.md) 7절)
-- [ ] 시연 — 장애 주입 시나리오 3종 녹화
+- [x] 설계 결정 — [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) · 막힘과 해결 — [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (좌우 라벨 실측 확인)
+- [x] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시 (에디터 PIE 빠른 재시작, 실제 카메라 가림 확인)
+- [x] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드 · `NS_PoseHands` 이펙트
+- [ ] 시연 — 장애 주입 시나리오 3종 녹화 (세 시나리오 모두 동작 확인, 녹화 남음)
 
 ## 파이프라인
 
@@ -57,20 +57,19 @@ unreal/                    UE 5.7 C++ 프로젝트 (PoseOscUnreal.uproject, 게�
     PoseNiagaraDriverComponent 연출: 볼륨 매핑 · 렌더 보간 · 크로스페이드 → Niagara User 파라미터 (D13)
     PosePresentationMath       연출 계산 순수 함수 (매핑, exp 보간, 가중치)
     PoseInteractionActor, PoseOscGameMode  루트 Box = 인터랙션 볼륨 + 카메라 + Niagara, 빈 맵이면 자동 생성
-    Private/Tests/PoseOscSpecs.cpp       Automation Spec (24개)
+    Private/Tests/PoseOscSpecs.cpp       Automation Spec (25개)
   Content/FX/NS_PoseHands    Niagara 시스템 (에디터에서 작성, Git LFS)
 docs/
   DESIGN_DECISIONS.md     설계 결정 — 선택지, 채택 이유, 검증 필요 항목
   TROUBLESHOOTING.md      막힘과 해결 기록
-  NEXT_SESSION_PROMPT.md  다음 작업 세션 시작 프롬프트
-  NIAGARA_SETUP.md        Niagara 시스템 NS_PoseHands 만드는 순서
 ```
 
 ## 환경
 
 - Unreal Engine 5.7.x (C++) · Rider · Windows
 - Python 3.11 + venv · MediaPipe Tasks API (CPU 추론)
-- 웹캠 1280×720 @ 30fps · GPU RTX 4050 Laptop (Unreal 렌더 전용)
+- 웹캠: 내장 카메라가 1920×1080 @ 60fps만 제공해서 그대로 캡처하고, 처리·송신은 30Hz로 고정 (DESIGN_DECISIONS D9 `변경` 메모)
+- GPU는 Unreal 렌더 전용 (RTX 4050 Laptop · RTX 4070 Laptop에서 확인)
 
 ## 실행 방법
 
@@ -149,21 +148,42 @@ R: LOST     0.3s | conf 0.10 | target (0.683, 0.454) | Holding 0.51s > 0.50s
 - D6 수치(0.6 / 0.4 / 0.5초 / 0.2초 / 0.15초 / 1.0초)는 PIE 중 액터의 `Interaction` 컴포넌트 Details에서 바로 바꿀 수 있어요.
 - 수신 주소는 `unreal\Config\DefaultGame.ini`. 엔진 OSC 플러그인이 `127.0.0.1`을 LAN IP로 바꿔 바인딩하기 때문에 `0.0.0.0` + 허용 송신자 `127.0.0.1`로 두었어요 (DESIGN_DECISIONS D3 `변경` 메모, T-005).
 
-**3) 시연 시나리오** (DESIGN_DECISIONS.md §6)
+**3) Niagara 시스템** (DESIGN_DECISIONS D13)
+
+`unreal/Content/FX/NS_PoseHands`는 에디터에서 직접 만든 에셋이에요. C++ 드라이버(`UPoseNiagaraDriverComponent`)가 매 프레임 User 파라미터 5개를 채우고, Niagara는 이 값을 읽기만 해요. 상태 판단과 크로스페이드는 C++에서 끝나요.
+
+| User 파라미터 | 타입 | 값 |
+|---|---|---|
+| `LeftHandPos`, `RightHandPos` | Position | 볼륨 안의 손 월드 위치 (렌더 보간 적용, 재획득 시 스냅) |
+| `LeftHandWeight`, `RightHandWeight` | Float | 0~1 크로스페이드 (Tracking 1 · Holding 0.6 · Lost 0) |
+| `InteractiveWeight` | Float | 0~1 크로스페이드 (Interactive 1 · Idle 0) |
+
+- 이미터 작성 기준: `LeftHand`·`RightHand`(Fountain 기반)는 SpawnRate를 `User.LeftHandWeight * 300`(오른손도 같은 방식)으로, `Particles.Position`을 `User.LeftHandPos`에 연결하고 Local Space는 꺼요. 속도·중력을 낮추고 수명을 짧게 해서 파티클이 손 주변에 머물게 했어요. `Ambient`(Hanging Particulates 기반)는 SpawnRate를 `(1 - InteractiveWeight) * 30 + (2 - LeftHandWeight - RightHandWeight) * 10 + 3`으로 둬서 Idle이거나 손이 Lost일 때 공간을 채워요.
+- 경로는 정확히 `/Game/FX/NS_PoseHands`여야 해요 (`DefaultGame.ini`의 `DefaultSystem`). 콘텐츠 브라우저의 `Content`가 곧 `/Game`이라서, `Game` 폴더를 따로 만들면 액터가 찾지 못해요 (T-008).
+- Output Log로 연결을 확인해요: `Driving Niagara system NS_PoseHands`는 연결 성공, `Niagara system ... not found ...; debug drawing only`는 경로 문제, `Niagara User parameter 'X' is missing` / `has type ...`은 이름·타입 오타예요.
+- 디버그 드로잉은 액터의 `NiagaraDriver` 컴포넌트에서 **Draw Debug**로 켜고 꺼요. 박스는 볼륨, 색 구는 보간된 손 위치(색 = 상태, 크기 = 가중치), 흰 점은 보간 전 수신 목표예요. 녹화할 때는 꺼 두세요. 시나리오 3에서는 흰 점이 필터 효과를 가장 잘 보여 줘서 켜 둬도 돼요.
+
+**4) 시연 시나리오** (DESIGN_DECISIONS.md §6)
+
+송신부는 하나만 띄워요. 둘이면 먼저 연결된 쪽만 받고 화면에 `SECOND SENDER ignored`가 떠요 (T-007).
 
 | 시나리오 | 하는 일 | 화면에서 보이는 것 |
 |---|---|---|
 | 1. 신뢰도 폴백 | 손으로 카메라를 가림 (카메라 없이: `--source synthetic`의 6.0~7.5초 구간) | 해당 손 `TRACKING → HOLDING`(노랑) → 0.5초 뒤 `LOST`(빨강) → 손을 떼면 `TRACKING` |
 | 2. 패킷 끊김 폴백 | Python을 Ctrl+C로 종료 → 다시 실행 (한 번의 실행으로: `--freeze-after 5 --freeze-for 3`) | 1.0초 뒤 `IDLE`, 양손 `LOST` → 재실행 0.2초 뒤 `INTERACTIVE` (로그에 `Seq baseline 0`) |
-| 3. 필터 비교 | `--noise 0.02`로 실행하고 `f`로 토글 | 3단계(Niagara)에서 확인 |
+| 3. 필터 비교 | `--noise 0.02 --no-filter --preview`로 실행하고 `f`로 토글 (카메라 없이: `--source synthetic --synthetic-no-events`를 추가) | 필터 OFF에서는 손을 멈춰도 흰 점과 파티클이 떨리고, ON으로 바꾸면 가라앉아요. 손 상태는 `TRACKING` 그대로예요 (노이즈는 좌표에만 들어가요). 송신부 로그의 `jitter raw→필터`가 정량 비교예요 |
 
-**4) 테스트 (헤드리스)**
+- `f`는 Python 콘솔이나 미리보기 창이 포커스일 때만 먹어요. Unreal 창이 포커스면 키가 Unreal로 가요.
+- 필터를 켜고 손을 빠르게 움직이면 조금 늦게 따라와요. 떨림을 줄이는 대신 반응이 느려지는 트레이드오프예요 (`--min-cutoff`, `--beta`로 조정).
+- 미리보기 창 위쪽의 `filter ON/OFF` 표시와 Unreal 화면을 나란히 놓고 녹화하면, 언제 토글했는지 영상에서 바로 보여요.
+
+**5) 테스트 (헤드리스)**
 
 ```powershell
 & "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "$PWD\unreal\PoseOscUnreal.uproject" "-ExecCmds=Automation RunTests PoseOscUnreal;Quit" -unattended -nullrhi -nosplash
 ```
 
-기대 출력: 마지막 줄 `**** TEST COMPLETE. EXIT CODE: 0 ****`, `unreal\Saved\Logs\PoseOscUnreal.log`에 `Result={Success}` 24개. 시작 직후의 `LogAutomationTest: Error: Condition failed` 4줄은 엔진 쪽 출력이에요 (DESIGN_DECISIONS D12 참고).
+기대 출력: 마지막 줄 `**** TEST COMPLETE. EXIT CODE: 0 ****`, `unreal\Saved\Logs\PoseOscUnreal.log`에 `Result={Success}` 25개. 시작 직후의 `LogAutomationTest: Error: Condition failed` 4줄은 엔진 쪽 출력이에요 (DESIGN_DECISIONS D12 참고).
 
 ### 좌우 라벨 확인 (DESIGN_DECISIONS.md §8의 3번)
 

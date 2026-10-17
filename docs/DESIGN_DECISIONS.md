@@ -409,7 +409,7 @@
 |---|---|---|---|
 | Niagara 연결 층 (§9) | C++ 드라이버 컴포넌트 / 블루프린트 | **C++ `UPoseNiagaraDriverComponent`** (파라미터 이름은 UPROPERTY) | D0 "C++ 우선, 블루프린트는 얇은 층만". BP나 Details에서는 에셋 지정만 해요. 시작할 때 User 파라미터의 이름·타입을 검증하고, 없으면 경고만 남겨요 (형식 오류에 안전한 폴백) |
 | User 파라미터 (§9) | 시스템 1개 + 이름 5개 / 손별 컴포넌트 2개 | **시스템 1개 `NS_PoseHands`, §9 제안 이름 그대로** (`LeftHandPos`·`RightHandPos` = Position, `LeftHandWeight`·`RightHandWeight`·`InteractiveWeight` = Float) | 손 이펙트와 기본 연출이 한 시스템 안에서 서로를 보고 섞여요. 위치는 Position 타입이라 LWC 변환을 Niagara가 처리해요 (`SetVariableVec3`가 Position 파라미터를 감지해서 `SetVariablePosition`으로 넘김 — `NiagaraComponent.cpp:2689-2696`). `User.` 접두사는 붙여도 되고 빼도 돼요 (`NiagaraUserRedirectionParameterStore.cpp:26-106`) |
-| Niagara 에셋 저작 | 스크립트로 생성 / ue-mcp / 자체 에디터 커맨드렛 / 에디터에서 사용자 작성 | **에디터에서 사용자 작성** ([NIAGARA_SETUP.md](NIAGARA_SETUP.md), 사용자 선택) | NiagaraEditor 모듈에는 Blueprint·Python으로 노출된 저작 API가 사실상 없어요 (`NiagaraEditor/Public`에서 `UpgradeNiagaraScriptResults.h` 하나뿐). 다른 경로의 검토 결과는 아래 메모 |
+| Niagara 에셋 저작 | 스크립트로 생성 / ue-mcp / 자체 에디터 커맨드렛 / 에디터에서 사용자 작성 | **에디터에서 사용자 작성** (사용자 선택. 파라미터 계약·이미터 작성 기준은 [README](../README.md) 「Niagara 시스템」) | NiagaraEditor 모듈에는 Blueprint·Python으로 노출된 저작 API가 사실상 없어요 (`NiagaraEditor/Public`에서 `UpgradeNiagaraScriptResults.h` 하나뿐). 다른 경로의 검토 결과는 아래 메모 |
 | 볼륨 (D7) | 별도 볼륨 액터 / 액터 루트 Box | **`APoseInteractionActor`의 루트 `UBoxComponent`**, 기본 320×100×180cm (16:9 면이 관람 방향) | 액터를 옮기고·돌리고·스케일하면 매핑 공간이 그대로 따라가요. 축 규칙은 D7 초기 제안 그대로: x → 로컬 Y, y → 로컬 Z(반전), z → 로컬 X(`DepthWeight` 0으로 시작) |
 | 카메라 | 레벨 카메라 / 액터 카메라 | **액터 카메라**(−X 260cm에서 +X를 봄, FOV 90°, `bUseAsViewTarget`). 게임 모드의 기본 Pawn은 없앰 | 시연 구도를 고정해요. 매핑은 카메라와 독립이라 D7과 부딪히지 않아요 (카메라를 레벨 것으로 바꿔도 매핑은 그대로) |
 | 노출 | 자동 노출 / 수동 | **카메라 PostProcess 수동 노출** (Manual, 물리 카메라 노출 끔, Bias 0) | 빈 맵은 검은 화면이라 자동 노출이 HDR 파티클을 과하게 밝혀요 (**추측** — 에셋 연결 뒤 화면으로 확인) |
@@ -437,7 +437,12 @@
 - 사용자가 에디터에서 `NS_PoseHands`를 만들었어요 (LeftHand/RightHand = Fountain 기반, Ambient = Hanging Particulates 기반). 경로를 `/Game/FX`로 옮긴 뒤(T-008) `Driving Niagara system NS_PoseHands`가 찍히고, User 파라미터 5개의 이름·타입 경고가 없었어요.
 - 창 모드 + synthetic: 양손 위치에서 파티클이 나오고, Lost가 된 손은 줄기가 가늘어지다가 끊겨요. Idle에서는 Ambient가 늘어요.
 - 실제 카메라 송신부와 함께: 손을 따라 파티클이 나오고, 15초 동안 손 상태 전환이 21번 있었어요. 화면 가장자리(y≈0.84)에서 신뢰도가 0.6 근처를 오가는 것으로 보여요. 최소 유지 시간 같은 튜닝 후보로 남겨요 (그동안 사용자가 손을 어떻게 움직였는지는 확인하지 못해서 단정하지 않아요).
-- 남은 연출 튜닝: Fountain의 위쪽 속도와 중력이 그대로라 파티클이 높이 솟았다가 화면 전체로 떨어져요. 손 주변에 머무르도록 속도·중력·수명·크기·색을 줄이는 게 다음 작업이에요 ([NIAGARA_SETUP.md](NIAGARA_SETUP.md) 7절).
+- 남은 연출 튜닝: Fountain의 위쪽 속도와 중력이 그대로라 파티클이 높이 솟았다가 화면 전체로 떨어져요. 손 주변에 머무르도록 속도·중력·수명·크기·색을 줄이는 게 다음 작업이에요 (작성 안내 문서 `NIAGARA_SETUP.md` 7절 — 이 문서는 2026-10-17 작업이 끝나 삭제했어요. 내용은 git 이력에 남아 있어요).
+
+**검증 결과 (2026-10-17, 이펙트 다듬기 후)**
+- 사용자가 위 방향(속도·중력·수명·크기·색)대로 이펙트를 다듬어 저장했어요 (`c8adf00`). 실제로 바꾼 항목과 값은 에셋 안에만 있어요.
+- 시나리오 3(`--noise 0.02` + `f` 토글)을 사용자가 진행했어요. 지터 수치는 아직 기록하지 않았어요.
+- 두 번째 PC(i9-14900HX · RTX 4070 Laptop)에서 클론해 빌드하고 Automation Spec 25/25를 확인했어요. 이 PC에서도 사용자가 카메라·PIE 동작을 확인했어요.
 
 **면접 포인트**: 상태(해석)와 연출을 나눠서, 폴백 판단은 C++ 상태 머신에 두고 Niagara는 0~1 가중치만 보게 했어요. 그래서 아티스트가 이펙트를 바꿔도 폴백 동작은 그대로예요.
 
@@ -586,3 +591,4 @@
 | 2026-10-15 | 사용자 확인 반영 — 좌우 라벨·PIE 시나리오 1·2·PIE 빠른 재시작 정상, T-001 원인(삼성 설정 "카메라 비활성") |
 | 2026-10-15 | 3단계(연출) — D13 신설, D4 `VInterpTo` 소스 확인, §9 Niagara·수치 항목 결정, Niagara 에셋 저작 안내 `NIAGARA_SETUP.md` 추가 |
 | 2026-10-15 | D13 Niagara 저작 자동화 검토(ue-mcp 1.4.4는 UE 5.7에서 User 파라미터 추가·연결 불가) → 사용자 직접 작성. `NS_PoseHands` 연결 검증, D3 보강 "송신자 고정"(T-007) |
+| 2026-10-17 | 3단계 마무리 — D13에 이펙트 다듬기·시나리오 3 검증 결과 추가. 작업용 문서 `NEXT_SESSION_PROMPT.md`·`NIAGARA_SETUP.md` 삭제(Niagara 파라미터 계약은 README로 옮김) |
