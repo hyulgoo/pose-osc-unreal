@@ -72,4 +72,22 @@ namespace PosePresentation
 		}
 		return 0.f;
 	}
+
+	/**
+	 * How much a hand at Distance opens a flower (D14): 1 up to InnerRadius, smoothstep down to 0 at OuterRadius.
+	 * OuterRadius <= InnerRadius gives a hard edge at InnerRadius.
+	 */
+	inline float BloomInfluence(double Distance, double InnerRadius, double OuterRadius)
+	{
+		if (Distance <= InnerRadius)
+		{
+			return 1.f;
+		}
+		if (Distance >= OuterRadius)
+		{
+			return 0.f;
+		}
+		const double T = (Distance - InnerRadius) / (OuterRadius - InnerRadius);
+		return static_cast<float>(1.0 - T * T * (3.0 - 2.0 * T));
+	}
 }

@@ -9,6 +9,7 @@
 - [x] Python 송신부 — 캡처 스레드 · Pose Landmarker · One Euro Filter · OSC 송신 · 장애 주입 옵션 · 수신 검사기 (좌우 라벨 실측 확인)
 - [x] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시 (에디터 PIE 빠른 재시작, 실제 카메라 가림 확인)
 - [x] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드 · `NS_PoseHands` 이펙트
+- [x] 꽃밭 — 봉오리 꽃밭에서 손목 근처의 꽃만 피어나는 미디어 아트 연출 (`UPoseFlowerFieldComponent`, D14)
 - [ ] 시연 — 장애 주입 시나리오 3종 녹화 (세 시나리오 모두 동작 확인, 녹화 남음)
 
 ## 파이프라인
@@ -47,7 +48,8 @@ python/
     download_model.py      모델 다운로드 + SHA-256 검증
   tests/                   pytest (단위 + localhost 루프백)
 unreal/                    UE 5.7 C++ 프로젝트 (PoseOscUnreal.uproject, 게임 모듈 1개)
-  Config/DefaultGame.ini   수신 주소·포트·허용 송신자 (Config=Game)
+  Config/DefaultGame.ini   수신 주소·포트·허용 송신자, 기본 Niagara 시스템·꽃 머티리얼 경로 (Config=Game)
+  Scripts/create_flower_material.py  M_PoseFlower 생성 (에디터 Python, D14)
   Source/PoseOscUnreal/
     PoseOscReceiverComponent   전송: UOSCServer 수명, 형식 검증, seq, 최신 값 1칸 (D5)
     PoseOscMessageDecoder      /dstrict/hands 엄격 디코드 (D3)
@@ -55,10 +57,12 @@ unreal/                    UE 5.7 C++ 프로젝트 (PoseOscUnreal.uproject, 게�
     PoseInteractionStateMachine 해석: 손별 Tracking/Holding/Lost + 전역 Interactive/Idle (순수 C++, D6)
     PoseInteractionComponent   연결: 매 Tick 최신 프레임 → 상태 머신, 화면 디버그 표시
     PoseNiagaraDriverComponent 연출: 볼륨 매핑 · 렌더 보간 · 크로스페이드 → Niagara User 파라미터 (D13)
-    PosePresentationMath       연출 계산 순수 함수 (매핑, exp 보간, 가중치)
-    PoseInteractionActor, PoseOscGameMode  루트 Box = 인터랙션 볼륨 + 카메라 + Niagara, 빈 맵이면 자동 생성
-    Private/Tests/PoseOscSpecs.cpp       Automation Spec (25개)
+    PoseFlowerFieldComponent   연출: 볼륨 앞면 꽃밭 · 손목 거리로 개화 · 인스턴스 커스텀 데이터 (D14)
+    PosePresentationMath       연출 계산 순수 함수 (매핑, exp 보간, 가중치, 개화 감쇠)
+    PoseInteractionActor, PoseOscGameMode  루트 Box = 인터랙션 볼륨 + 카메라 + Niagara + 꽃밭, 빈 맵이면 자동 생성
+    Private/Tests/PoseOscSpecs.cpp       Automation Spec (27개)
   Content/FX/NS_PoseHands    Niagara 시스템 (에디터에서 작성, Git LFS)
+  Content/FX/M_PoseFlower    꽃잎 발광 머티리얼 (스크립트로 생성, Git LFS)
 docs/
   DESIGN_DECISIONS.md     설계 결정 — 선택지, 채택 이유, 검증 필요 항목
   TROUBLESHOOTING.md      막힘과 해결 기록
@@ -163,7 +167,18 @@ R: LOST     0.3s | conf 0.10 | target (0.683, 0.454) | Holding 0.51s > 0.50s
 - Output Log로 연결을 확인해요: `Driving Niagara system NS_PoseHands`는 연결 성공, `Niagara system ... not found ...; debug drawing only`는 경로 문제, `Niagara User parameter 'X' is missing` / `has type ...`은 이름·타입 오타예요.
 - 디버그 드로잉은 액터의 `NiagaraDriver` 컴포넌트에서 **Draw Debug**로 켜고 꺼요. 박스는 볼륨, 색 구는 보간된 손 위치(색 = 상태, 크기 = 가중치), 흰 점은 보간 전 수신 목표예요. 녹화할 때는 꺼 두세요. 시나리오 3에서는 흰 점이 필터 효과를 가장 잘 보여 줘서 켜 둬도 돼요.
 
-**4) 시연 시나리오** (DESIGN_DECISIONS.md §6)
+**4) 꽃밭** (DESIGN_DECISIONS D14)
+
+볼륨 앞면에 남색 봉오리 220송이가 숨 쉬듯 깜빡이고, 손목 근처(20cm 안은 활짝, 55cm까지 서서히)의 꽃만 피어나요. 손이 지나가면 1초 남짓에 걸쳐 천천히 닫혀서 꽃길이 남아요. `UPoseFlowerFieldComponent`는 Niagara 드라이버의 손 위치·가중치만 읽기 때문에 폴백이 그대로 이어져요 — Holding이면 반쯤 핀 채로 남고, Lost·Idle이면 닫혀요.
+
+- 머티리얼 `/Game/FX/M_PoseFlower`는 스크립트로 만들어요. 에셋은 커밋돼 있으니, 그래프를 바꿨을 때만 에디터를 닫고 다시 실행하면 돼요.
+  ```powershell
+  & "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "$PWD\unreal\PoseOscUnreal.uproject" -run=pythonscript "-script=$PWD\unreal\Scripts\create_flower_material.py" -unattended -nosplash
+  ```
+- Output Log: `Flower field uses M_PoseFlower`와 `Flower field: 220 flowers x (6 petals + core) = 1540 instances`가 나오면 정상이에요. `Flower material ... not found`가 나오면 꽃은 보이지만 빛나지 않아요 (위 스크립트를 실행하세요).
+- 튜닝은 PIE 중 액터의 `Flowers` 컴포넌트 Details에서 해요. Bloom(반지름·열림/닫힘 시간), Look(팔레트·세기·꽃잎 각도·숨쉬기), Layout(개수·범위·크기·기울기·시드). Layout·꽃잎 수·팔레트를 바꾸면 꽃밭을 바로 다시 만들어요. **Draw Bloom Debug**를 켜면 손 주위에 개화 반지름 원이 보여요.
+
+**5) 시연 시나리오** (DESIGN_DECISIONS.md §6)
 
 송신부는 하나만 띄워요. 둘이면 먼저 연결된 쪽만 받고 화면에 `SECOND SENDER ignored`가 떠요 (T-007).
 
@@ -177,13 +192,13 @@ R: LOST     0.3s | conf 0.10 | target (0.683, 0.454) | Holding 0.51s > 0.50s
 - 필터를 켜고 손을 빠르게 움직이면 조금 늦게 따라와요. 떨림을 줄이는 대신 반응이 느려지는 트레이드오프예요 (`--min-cutoff`, `--beta`로 조정).
 - 미리보기 창 위쪽의 `filter ON/OFF` 표시와 Unreal 화면을 나란히 놓고 녹화하면, 언제 토글했는지 영상에서 바로 보여요.
 
-**5) 테스트 (헤드리스)**
+**6) 테스트 (헤드리스)**
 
 ```powershell
 & "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "$PWD\unreal\PoseOscUnreal.uproject" "-ExecCmds=Automation RunTests PoseOscUnreal;Quit" -unattended -nullrhi -nosplash
 ```
 
-기대 출력: 마지막 줄 `**** TEST COMPLETE. EXIT CODE: 0 ****`, `unreal\Saved\Logs\PoseOscUnreal.log`에 `Result={Success}` 25개. 시작 직후의 `LogAutomationTest: Error: Condition failed` 4줄은 엔진 쪽 출력이에요 (DESIGN_DECISIONS D12 참고).
+기대 출력: 마지막 줄 `**** TEST COMPLETE. EXIT CODE: 0 ****`, `unreal\Saved\Logs\PoseOscUnreal.log`에 `Result={Success}` 27개. 시작 직후의 `LogAutomationTest: Error: Condition failed` 4줄은 엔진 쪽 출력이에요 (DESIGN_DECISIONS D12 참고).
 
 ### 좌우 라벨 확인 (DESIGN_DECISIONS.md §8의 3번)
 

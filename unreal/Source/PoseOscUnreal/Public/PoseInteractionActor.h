@@ -8,6 +8,7 @@
 class UBoxComponent;
 class UCameraComponent;
 class UNiagaraComponent;
+class UPoseFlowerFieldComponent;
 class UPoseInteractionComponent;
 class UPoseNiagaraDriverComponent;
 class UPoseOscReceiverComponent;
@@ -15,7 +16,7 @@ class UPoseOscReceiverComponent;
 /**
  * Drop-in actor: the root box is the interaction volume (D7), so moving / rotating / scaling the actor places the
  * mapped space in the level. Carries the transport (receiver), interpretation (state machine) and presentation
- * (Niagara driver) components, plus an optional view camera looking along the volume's +X.
+ * (Niagara driver, flower field) components, plus an optional view camera looking along the volume's +X.
  */
 UCLASS()
 class POSEOSCUNREAL_API APoseInteractionActor : public AActor
@@ -28,6 +29,7 @@ public:
 	UPoseOscReceiverComponent* GetReceiver() const { return Receiver; }
 	UPoseInteractionComponent* GetInteraction() const { return Interaction; }
 	UPoseNiagaraDriverComponent* GetDriver() const { return Driver; }
+	UPoseFlowerFieldComponent* GetFlowers() const { return Flowers; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -52,6 +54,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "PoseOsc")
 	TObjectPtr<UPoseNiagaraDriverComponent> Driver;
+
+	UPROPERTY(VisibleAnywhere, Category = "PoseOsc")
+	TObjectPtr<UPoseFlowerFieldComponent> Flowers;
 
 	/** Make this actor's camera the first player's view target at BeginPlay (turn off to use a level camera). */
 	UPROPERTY(EditAnywhere, Category = "PoseOsc")

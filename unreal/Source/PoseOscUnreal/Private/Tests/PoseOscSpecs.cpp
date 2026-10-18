@@ -1,4 +1,4 @@
-// Automation specs for the plain C++ parts (seq rules, message decode, state machine).
+// Automation specs for the plain C++ parts (seq rules, message decode, state machine, presentation math, flower layout).
 // Run: UnrealEditor-Cmd.exe <uproject> -ExecCmds="Automation RunTests PoseOscUnreal;Quit" -unattended -nullrhi -nosplash
 
 #include "Misc/AutomationTest.h"
@@ -8,6 +8,7 @@
 #include "OSCAddress.h"
 #include "OSCMessage.h"
 #include "OSCTypes.h"
+#include "PoseFlowerFieldComponent.h"
 #include "PoseInteractionStateMachine.h"
 #include "PoseOscMessageDecoder.h"
 #include "PosePresentationMath.h"
@@ -399,6 +400,55 @@ void FPosePresentationSpec::Define()
 		TestEqual(TEXT("tracking"), HandWeightTarget(EPoseHandState::Tracking, 0.6f), 1.f);
 		TestEqual(TEXT("holding"), HandWeightTarget(EPoseHandState::Holding, 0.6f), 0.6f);
 		TestEqual(TEXT("lost"), HandWeightTarget(EPoseHandState::Lost, 0.6f), 0.f);
+	});
+}
+
+// ----- flower field (D14) --------------------------------------------------------------------------------------
+
+BEGIN_DEFINE_SPEC(FPoseFlowerSpec, "PoseOscUnreal.Flower", EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+END_DEFINE_SPEC(FPoseFlowerSpec)
+
+void FPoseFlowerSpec::Define()
+{
+	using namespace PosePresentation;
+
+	It("opens fully inside the inner radius and not at all beyond the outer radius", [this]()
+	{
+		TestEqual(TEXT("at the wrist"), BloomInfluence(0.0, 20.0, 55.0), 1.f);
+		TestEqual(TEXT("inner edge"), BloomInfluence(20.0, 20.0, 55.0), 1.f);
+		TestEqual(TEXT("halfway"), BloomInfluence(37.5, 20.0, 55.0), 0.5f, 1e-5f);
+		TestTrue(TEXT("decreasing"), BloomInfluence(30.0, 20.0, 55.0) > BloomInfluence(45.0, 20.0, 55.0));
+		TestEqual(TEXT("outer edge"), BloomInfluence(55.0, 20.0, 55.0), 0.f);
+		TestEqual(TEXT("far"), BloomInfluence(500.0, 20.0, 55.0), 0.f);
+		TestEqual(TEXT("hard edge inside"), BloomInfluence(30.0, 30.0, 10.0), 1.f);
+		TestEqual(TEXT("hard edge outside"), BloomInfluence(30.1, 30.0, 10.0), 0.f);
+	});
+
+	It("lays out Columns x Rows flowers inside the field, the same for the same seed", [this]()
+	{
+		const FVector Extent(50.0, 160.0, 90.0);
+		FPoseFlowerLayoutSettings Settings;
+		Settings.Columns = 8;
+		Settings.Rows = 5;
+		Settings.Jitter = 0.9f;
+		const TArray<FPoseFlowerSeed> Seeds = PoseFlower::MakeLayout(Settings, Extent);
+		TestEqual(TEXT("count"), Seeds.Num(), 40);
+
+		bool bInside = true;
+		for (const FPoseFlowerSeed& Seed : Seeds)
+		{
+			bInside &= FMath::Abs(Seed.Location.Y) <= Extent.Y * Settings.FieldScale
+				&& FMath::Abs(Seed.Location.Z) <= Extent.Z * Settings.FieldScale
+				&& FMath::Abs(Seed.Location.X) <= Settings.DepthJitter
+				&& Seed.Size >= Settings.SizeMin && Seed.Size <= Settings.SizeMax;
+		}
+		TestTrue(TEXT("inside the field, size in range"), bInside);
+		TestTrue(TEXT("first row at the top"), Seeds[0].Location.Z > Seeds.Last().Location.Z);
+
+		const TArray<FPoseFlowerSeed> Again = PoseFlower::MakeLayout(Settings, Extent);
+		TestTrue(TEXT("deterministic"), Again[17].Location.Equals(Seeds[17].Location) && Again[17].ColorPick == Seeds[17].ColorPick);
+		Settings.Seed += 1;
+		TestFalse(TEXT("seed changes the field"), PoseFlower::MakeLayout(Settings, Extent)[17].Location.Equals(Seeds[17].Location));
 	});
 }
 

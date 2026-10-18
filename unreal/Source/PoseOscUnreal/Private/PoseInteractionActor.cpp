@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "NiagaraComponent.h"
+#include "PoseFlowerFieldComponent.h"
 #include "PoseInteractionComponent.h"
 #include "PoseNiagaraDriverComponent.h"
 #include "PoseOscReceiverComponent.h"
@@ -39,6 +40,10 @@ APoseInteractionActor::APoseInteractionActor()
 	Effects = CreateDefaultSubobject<UNiagaraComponent>(TEXT("Effects"));
 	Effects->SetupAttachment(InteractionVolume);
 	Effects->SetAutoActivate(true);
+
+	// Flowers grow on the volume face; their local space is the volume's (D14).
+	Flowers = CreateDefaultSubobject<UPoseFlowerFieldComponent>(TEXT("Flowers"));
+	Flowers->SetupAttachment(InteractionVolume);
 
 	Receiver = CreateDefaultSubobject<UPoseOscReceiverComponent>(TEXT("OscReceiver"));
 	Interaction = CreateDefaultSubobject<UPoseInteractionComponent>(TEXT("Interaction"));
