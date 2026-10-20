@@ -3,6 +3,22 @@
 웹캠 포즈 추정(MediaPipe) 결과를 OSC(UDP)로 Unreal Engine 5.7에 보내서, 손 위치에 Niagara 파티클이 반응하는 공간 인터랙티브 미니 프로젝트예요.
 모델 출력이 흔들리거나 파이프라인이 끊겨도 연출이 깨지지 않도록 폴백을 처음부터 설계에 넣었어요.
 
+## 시연 영상
+
+[![pose-osc-unreal 시연 영상](https://img.youtube.com/vi/f2koXpoyq-s/maxresdefault.jpg)](https://youtu.be/f2koXpoyq-s)
+
+카메라 없이 정해진 손 움직임(합성 입력)을 보내면서 장애를 하나씩 주입한 54초 영상이에요. 장면마다 자막이 먼저 나오고 1~2초 뒤에 주입돼요. 왼쪽 위는 Unreal 화면의 상태 표시를 키워서 겹친 거예요.
+
+| 장면 | 주입 | 보이는 것 |
+|---|---|---|
+| [① 0:07](https://youtu.be/f2koXpoyq-s?t=7) | 왼손 신뢰도를 0.42~0.58 사이로 흔듦 | 히스테리시스 구간이라 `TRACKING` 유지, 꽃이 깜빡이지 않음 |
+| [② 0:14](https://youtu.be/f2koXpoyq-s?t=14) | 오른손 가림 (신뢰도 0.1) | `HOLDING` → 0.5초 뒤 `LOST`, 오른손 꽃이 닫힘 → 해제하면 바로 `TRACKING` |
+| [③ 0:26](https://youtu.be/f2koXpoyq-s?t=26) | 송신 4초 중단 | 1초 뒤 `IDLE`, 꽃이 모두 닫힘 → 재개 0.2초 뒤 `INTERACTIVE` |
+| [④ 0:37](https://youtu.be/f2koXpoyq-s?t=37) | 손을 멈추고 좌표 노이즈 σ 0.035 | 필터 OFF면 파티클이 떨리고 ON이면 가라앉음 (송신부 지터 약 0.11 → 0.011) |
+
+- ④의 노이즈는 영상에서 잘 보이도록 아래 시연 시나리오 3의 0.02보다 키웠어요.
+- 장면 순서와 길이는 녹화용 시간표로 맞췄어요. 같은 상황은 아래 [실행 방법](#실행-방법)의 시연 시나리오 옵션으로 재현할 수 있어요.
+
 ## 진행 상황
 
 - [x] 설계 결정 — [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) · 막힘과 해결 — [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
@@ -10,7 +26,7 @@
 - [x] Unreal 수신부 — OSC 수신 컴포넌트 · 상태 머신 · 디버그 표시 (에디터 PIE 빠른 재시작, 실제 카메라 가림 확인)
 - [x] 연출 — Niagara 연결 · 인터랙션 볼륨 매핑 · 크로스페이드 · `NS_PoseHands` 이펙트
 - [x] 꽃밭 — 봉오리 꽃밭에서 손목 근처의 꽃만 피어나는 미디어 아트 연출 (`UPoseFlowerFieldComponent`, D14)
-- [ ] 시연 — 장애 주입 시나리오 3종 녹화 (세 시나리오 모두 동작 확인, 녹화 남음)
+- [x] 시연 — 장애 주입 시나리오 3종 + 히스테리시스 녹화 — [시연 영상](#시연-영상) ([YouTube](https://youtu.be/f2koXpoyq-s))
 
 ## 파이프라인
 
